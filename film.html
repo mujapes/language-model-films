@@ -303,7 +303,49 @@ function vignette(){
    SCENES
    ============================================================ */
 const SCENES=[];
-const S=(id,name,dur,captions,draw)=>SCENES.push({id,name,dur,captions,draw});
+const TEMPO=0.90;                        // global tightening; scenes+captions scale together
+const S=(id,name,dur,captions,draw)=>SCENES.push({
+  id,name,
+  dur:dur*TEMPO,
+  captions:captions.map(([ct,s])=>[ct*TEMPO,s]),
+  draw
+});
+
+/* Beats: normalized moments inside each scene where the frame should take a
+   hit — a fast scale punch that decays. These land on the reveal in each
+   scene, not on a metronome. */
+const BEATS={
+  open:[.36,.60],
+  tokens:[.16,.52,.84],
+  vectors:[.18,.55,.78],
+  attention:[.14,.53,.58,.76],
+  depth:[.30,.45,.92],
+  predict:[.20,.56,.72],
+  train:[.30,.60],
+  fail:[.28,.58,.82],
+  close:[.05,.40,.48]
+};
+/* Scenes that snap in on a hard cut instead of dissolving from black. */
+const CUT_IN=new Set(['tokens','attention','predict','fail']);
+
+/* Camera: slow drift per scene plus an impulse on each beat. Pure in t. */
+function camera(sc,idx,local){
+  const u=clamp(local/sc.dur);
+  // alternate slow push-in / pull-back so consecutive scenes don't feel identical
+  const dir=idx%2?-1:1;
+  let s=1+dir*0.028*eInOut(u);
+  let dx=0, dy=dir*-10*eInOut(u);
+  for(const b of (BEATS[sc.id]||[])){
+    const d=local-b*sc.dur;                 // seconds since the beat
+    if(d>=0&&d<0.55){
+      const a=Math.pow(1-d/0.55,2);         // sharp attack, fast decay
+      s+=0.034*a;
+      dy+=-7*a;
+      dx+=Math.sin(d*46)*3.2*a;             // brief settle wobble
+    }
+  }
+  return {s,dx,dy};
+}
 
 /* ---- 01 COLD OPEN ---------------------------------------- */
 S('open','Cold open',15,[
@@ -343,10 +385,15 @@ S('tokens','Tokens',27,[
     const st=clamp((flip-i*0.045)/0.35);
     const sep=seq(u,.16,.36);
     const col=[C.amber,C.cyan,C.magenta][i%3];
+    // each chip drops into place with a little overshoot, staggered
+    const inP=clamp((seq(u,.02,.20)-i*0.018)/0.14);
+    const dy=(1-eBack(inP))*54;
+    ctx.save(); ctx.translate(0,dy); ctx.globalAlpha=clamp(inP*1.4);
     chip(x,y-46,w,66,{stroke:sep>.1?col:C.rule,fill:'rgba(255,255,255,.03)',alpha:.9});
     txt(s,x+w/2,y,{font:f,align:'center',fill:C.ink,alpha:1-st});
     txt(String(id),x+w/2,y,{font:`600 32px ${MONO}`,align:'center',fill:col,alpha:st});
     if(sep>.5) txt('tok '+(i+1),x+w/2,y+48,{font:`400 13px ${MONO}`,align:'center',fill:C.dim,alpha:(sep-.5)*2*.7,track:1.5});
+    ctx.restore();
     x+=w+gap;
   });
   eyebrow('STEP 01 — TOKENIZE',W/2,250,seq(u,.05,.15));
@@ -554,7 +601,7 @@ S('predict','The distribution',35,[
     if(st<=0)return;
     const y=by+i*rh;
     txt(d[0].trim(),bx-24,y+22,{font:`500 21px ${MONO}`,align:'right',fill:i?C.dim:C.ink,alpha:st});
-    const w=Math.max(3,bwMax*d[1]*eOut(st));
+    const w=Math.max(3,bwMax*d[1]*(i?eOut(st):eBack(st)));
     chip(bx,y+4,w,26,{fill:i?'rgba(79,214,200,.55)':C.amber,r:2,alpha:st});
     txt((d[1]*100).toFixed(1)+'%',bx+w+14,y+23,{font:`400 16px ${MONO}`,fill:C.dim,alpha:st*.85});
   });
@@ -745,13 +792,33 @@ function draw(t){
   ctx.scale(scale,scale);
   ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();
   backdrop(t);
-  const [sc]=sceneAt(t);
+  const [sc,idx]=sceneAt(t);
   const local=t-sc.start;
+
+  // camera lives inside the clip so the frame edge stays fixed
+  const cam=camera(sc,idx,local);
+  ctx.save();
+  ctx.translate(W/2,H/2); ctx.scale(cam.s,cam.s); ctx.translate(-W/2+cam.dx,-H/2+cam.dy);
   sc.draw(local, clamp(local/sc.dur));
-  // cross-fade to black between scenes
+  ctx.restore();
+
+  // transitions: some scenes dissolve, some land on a hard cut
+  const next=SCENES[idx+1];
   const tail=sc.dur-local;
-  if(tail<0.55){ ctx.globalAlpha=(0.55-tail)/0.55*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
-  if(local<0.45){ ctx.globalAlpha=(0.45-local)/0.45*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  const nextCuts=next&&CUT_IN.has(next.id);
+  if(!nextCuts&&tail<0.45){
+    ctx.globalAlpha=(0.45-tail)/0.45*0.92; ctx.fillStyle=C.deep;
+    ctx.fillRect(0,0,W,H); ctx.globalAlpha=1;
+  }
+  if(CUT_IN.has(sc.id)){
+    if(local<0.10){                       // impact flash instead of a fade-up
+      ctx.globalAlpha=(1-local/0.10)*0.42; ctx.fillStyle=C.ink;
+      ctx.fillRect(0,0,W,H); ctx.globalAlpha=1;
+    }
+  } else if(local<0.40){
+    ctx.globalAlpha=(0.40-local)/0.40*0.92; ctx.fillStyle=C.deep;
+    ctx.fillRect(0,0,W,H); ctx.globalAlpha=1;
+  }
   vignette();
   ctx.restore();
 }
