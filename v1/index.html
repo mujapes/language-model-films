@@ -1,0 +1,867 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="cache-control" content="no-cache, must-revalidate">
+<meta http-equiv="expires" content="0">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>How a Language Model Thinks</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#0B1026;
+    --paper-2:#0E1533;
+    --ink:#F3EFE6;
+    --ink-dim:#8E96B8;
+    --rule:#26305C;
+    --amber:#FFB020;
+    --magenta:#FF4D8D;
+    --cyan:#4FD6C8;
+    --display:'Bricolage Grotesque','Archivo',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;
+  }
+  #shell{
+    width:100%;height:100%;max-width:1600px;
+    display:flex;flex-direction:column;
+    padding:clamp(8px,1.6vmin,22px);gap:clamp(8px,1.4vmin,16px);
+  }
+
+  /* ---------- masthead ---------- */
+  #top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-height:20px}
+  #mark{
+    font-family:var(--display);font-weight:800;
+    font-size:clamp(11px,1.5vmin,15px);letter-spacing:.16em;text-transform:uppercase;
+  }
+  #mark b{color:var(--amber);font-weight:800}
+  #chapter{
+    font-size:clamp(10px,1.35vmin,13px);color:var(--ink-dim);letter-spacing:.1em;
+    text-transform:uppercase;margin-left:auto;text-align:right;
+  }
+  #chapter em{color:var(--ink);font-style:normal}
+
+  /* ---------- stage ---------- */
+  #stage{
+    position:relative;flex:1;min-height:0;
+    border:1px solid var(--rule);border-radius:2px;
+    background:var(--paper-2);overflow:hidden;
+  }
+  canvas{display:block;width:100%;height:100%}
+  #cap{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:clamp(14px,3vmin,34px) clamp(16px,5vmin,72px);
+    background:linear-gradient(to top,rgba(11,16,38,.94) 30%,rgba(11,16,38,0));
+    pointer-events:none;
+  }
+  #cap p{
+    margin:0;font-size:clamp(12px,1.95vmin,19px);line-height:1.5;
+    max-width:62ch;color:var(--ink);
+    text-wrap:balance;
+    transition:opacity .28s ease;
+  }
+  #cap p::before{
+    content:"";display:inline-block;width:1.6em;height:1px;
+    background:var(--amber);vertical-align:middle;margin-right:.7em;
+    transform:translateY(-1px);
+  }
+  body.nocap #cap{display:none}
+
+  #bigplay{
+    position:absolute;inset:0;display:grid;place-items:center;
+    background:rgba(11,16,38,.72);border:0;cursor:pointer;
+    color:var(--ink);font-family:var(--display);font-weight:800;
+    letter-spacing:.14em;text-transform:uppercase;font-size:clamp(12px,1.7vmin,16px);
+  }
+  #bigplay span{
+    border:1px solid var(--amber);color:var(--amber);
+    padding:.85em 1.8em;border-radius:2px;
+  }
+  #bigplay:hover span{background:var(--amber);color:var(--paper)}
+  #bigplay[hidden]{display:none}
+
+  /* ---------- transport ---------- */
+  #bar{display:flex;flex-direction:column;gap:clamp(6px,1vmin,10px)}
+  #track{
+    position:relative;height:26px;cursor:pointer;touch-action:none;
+    display:flex;align-items:center;
+  }
+  #rail{position:absolute;left:0;right:0;height:3px;background:var(--rule)}
+  #fill{position:absolute;left:0;height:3px;background:var(--amber);width:0}
+  #knob{
+    position:absolute;width:2px;height:15px;background:var(--ink);
+    left:0;transform:translateX(-1px);
+  }
+  .tick{position:absolute;width:1px;height:9px;background:#3C4880;top:50%;transform:translateY(-50%)}
+  #track:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}
+
+  #ctrls{display:flex;align-items:center;gap:clamp(6px,1.1vmin,12px);flex-wrap:wrap}
+  button.t{
+    font-family:var(--mono);font-size:clamp(10px,1.35vmin,13px);
+    letter-spacing:.09em;text-transform:uppercase;
+    background:transparent;color:var(--ink-dim);
+    border:1px solid var(--rule);border-radius:2px;
+    padding:.62em 1em;cursor:pointer;transition:.15s;white-space:nowrap;
+  }
+  button.t:hover{color:var(--ink);border-color:var(--ink-dim)}
+  button.t[aria-pressed="true"]{color:var(--paper);background:var(--ink);border-color:var(--ink)}
+  button.t:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+  #play{color:var(--paper);background:var(--amber);border-color:var(--amber);min-width:7.5em;font-weight:600}
+  #play:hover{background:#FFC24D}
+  #clock{
+    font-size:clamp(10px,1.35vmin,13px);color:var(--ink-dim);
+    letter-spacing:.06em;margin-left:auto;font-variant-numeric:tabular-nums;
+  }
+  #clock b{color:var(--ink);font-weight:500}
+  .hint{font-size:clamp(9px,1.2vmin,12px);color:#5A6494;letter-spacing:.06em}
+  @media (max-width:720px){ .wide{display:none} #clock{margin-left:auto} }
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="top">
+    <div id="mark">How a Language Model <b>Thinks</b></div>
+    <div id="chapter"><em id="chNum">01</em> · <span id="chName">Cold open</span></div>
+  </div>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="cap"><p id="capText"></p></div>
+    <button id="bigplay"><span>▶ Play film · 4:13</span></button>
+  </div>
+
+  <div id="bar">
+    <div id="track" tabindex="0" role="slider" aria-label="Timeline" aria-valuemin="0" aria-valuemax="253" aria-valuenow="0">
+      <div id="rail"></div><div id="fill"></div><div id="knob"></div>
+    </div>
+    <div id="ctrls">
+      <button class="t" id="play">▶ Play</button>
+      <button class="t" id="back">◀◀ 10s</button>
+      <button class="t" id="fwd">10s ▶▶</button>
+      <button class="t" id="speed">1.0×</button>
+      <button class="t" id="capbtn" aria-pressed="true">Captions</button>
+      <button class="t" id="vo" aria-pressed="false">Narration</button>
+      <button class="t wide" id="full">Fullscreen</button>
+      <div id="clock"><b>0:00</b> / 4:13</div>
+    </div>
+    <div class="hint wide">Space play · ← → skip 10s · F fullscreen · record fullscreen to export MP4</div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   HOW A LANGUAGE MODEL THINKS
+   Timeline-driven canvas film. render(t) is pure — scrubbing
+   and recording are therefore exact.
+   ============================================================ */
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = 1600, H = 900;                 // internal design space
+let DPR = 1, ox = 0, oy = 0, scale = 1;
+
+function resize(){
+  const r = cv.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(r.width * DPR);
+  cv.height = Math.round(r.height * DPR);
+  scale = Math.min(r.width / W, r.height / H);
+  ox = (r.width - W * scale) / 2;
+  oy = (r.height - H * scale) / 2;
+  draw(T);
+}
+new ResizeObserver(resize).observe(document.getElementById('stage'));
+
+/* ---------- palette ---------- */
+const C = {
+  paper:'#0E1533', ink:'#F3EFE6', dim:'#8E96B8', rule:'#26305C',
+  amber:'#FFB020', magenta:'#FF4D8D', cyan:'#4FD6C8', deep:'#0B1026'
+};
+const DISPLAY = '"Bricolage Grotesque","Archivo",system-ui,sans-serif';
+const MONO = '"IBM Plex Mono",ui-monospace,Menlo,monospace';
+
+/* ---------- math helpers ---------- */
+const clamp=(v,a=0,b=1)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const seq=(u,a,b)=>clamp((u-a)/(b-a));           // normalized sub-window
+const eOut=t=>1-Math.pow(1-t,3);
+const eIn=t=>t*t*t;
+const eInOut=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+const eBack=t=>{const c=1.70158+1;return 1+(c+1)*Math.pow(t-1,3)+c*Math.pow(t-1,2)};
+function hash(n){ let x=Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+
+/* ---------- draw helpers ---------- */
+function txt(s,x,y,o={}){
+  ctx.save();
+  ctx.font=o.font||`400 24px ${MONO}`;
+  ctx.fillStyle=o.fill||C.ink;
+  ctx.textAlign=o.align||'left';
+  ctx.textBaseline=o.baseline||'alphabetic';
+  ctx.globalAlpha=o.alpha===undefined?1:clamp(o.alpha);
+  if(o.track){ // letter-spacing
+    const chars=[...s]; let total=0;
+    for(const ch of chars) total+=ctx.measureText(ch).width+o.track;
+    total-=o.track;
+    let cx = o.align==='center'? x-total/2 : o.align==='right'? x-total : x;
+    ctx.textAlign='left';
+    for(const ch of chars){ ctx.fillText(ch,cx,y); cx+=ctx.measureText(ch).width+o.track; }
+  } else ctx.fillText(s,x,y);
+  ctx.restore();
+}
+function measure(s,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(s).width; ctx.restore(); return w; }
+
+/* the signature: registration-ghosted display type */
+function ghostTitle(s,x,y,size,alpha=1,align='center'){
+  const f=`800 ${size}px ${DISPLAY}`;
+  const tr=size*0.01;
+  txt(s,x-3,y+2,{font:f,fill:C.magenta,align,alpha:alpha*.55,track:tr});
+  txt(s,x+3,y-2,{font:f,fill:C.cyan,align,alpha:alpha*.5,track:tr});
+  txt(s,x,y,{font:f,fill:C.ink,align,alpha,track:tr});
+}
+
+/* plotter stroke: path draws itself on */
+function plot(pts,p,o={}){
+  if(pts.length<2||p<=0)return;
+  let total=0; const seg=[];
+  for(let i=1;i<pts.length;i++){
+    const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+    seg.push(d); total+=d;
+  }
+  const target=total*clamp(p);
+  ctx.save();
+  ctx.strokeStyle=o.stroke||C.ink; ctx.lineWidth=o.w||1.5;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.globalAlpha=o.alpha===undefined?1:o.alpha;
+  if(o.dash)ctx.setLineDash(o.dash);
+  ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+  let acc=0;
+  for(let i=1;i<pts.length;i++){
+    if(acc+seg[i-1]<=target){ ctx.lineTo(pts[i][0],pts[i][1]); acc+=seg[i-1]; }
+    else{
+      const k=(target-acc)/seg[i-1];
+      ctx.lineTo(lerp(pts[i-1][0],pts[i][0],k),lerp(pts[i-1][1],pts[i][1],k));
+      break;
+    }
+  }
+  ctx.stroke(); ctx.restore();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  const k=Math.min(r,w/2,h/2);
+  ctx.moveTo(x+k,y); ctx.arcTo(x+w,y,x+w,y+h,k); ctx.arcTo(x+w,y+h,x,y+h,k);
+  ctx.arcTo(x,y+h,x,y,k); ctx.arcTo(x,y,x+w,y,k); ctx.closePath();
+}
+function chip(x,y,w,h,{fill,stroke,alpha=1,r=3}={}){
+  ctx.save(); ctx.globalAlpha=alpha;
+  rr(x,y,w,h,r);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.25;ctx.stroke();}
+  ctx.restore();
+}
+function typeOn(s,x,y,p,o={}){
+  const n=Math.floor(clamp(p)*s.length+.0001);
+  const shown=s.slice(0,n);
+  txt(shown,x,y,o);
+  if(p<1&&p>0){
+    const f=o.font||`400 24px ${MONO}`;
+    const wAll=measure(shown,f);
+    const cx=o.align==='center'?x-measure(s,f)/2+wAll:o.align==='right'?x-measure(s,f)+wAll:x+wAll;
+    const sz=parseInt(f)||24;
+    ctx.save();ctx.globalAlpha=.9;ctx.fillStyle=C.amber;
+    ctx.fillRect(cx+3,y-sz*.78,sz*.5,sz*.9);ctx.restore();
+  }
+}
+function eyebrow(s,x,y,alpha=1,color=C.amber,align='center'){
+  txt(s,x,y,{font:`500 15px ${MONO}`,fill:color,alpha,track:3.2,align});
+}
+
+/* ambient: the blueprint field */
+function backdrop(t){
+  ctx.fillStyle=C.paper; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalAlpha=.5; ctx.fillStyle='#1A2247';
+  for(let x=40;x<W;x+=40) for(let y=40;y<H;y+=40) ctx.fillRect(x,y,1.2,1.2);
+  ctx.restore();
+  // slow drifting horizon rule
+  ctx.save(); ctx.globalAlpha=.35; ctx.strokeStyle=C.rule; ctx.lineWidth=1;
+  const yy=H/2+Math.sin(t*.18)*70;
+  ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(W,yy);ctx.stroke(); ctx.restore();
+}
+function vignette(){
+  const g=ctx.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.95);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(6,9,24,.75)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+/* ============================================================
+   SCENES
+   ============================================================ */
+const SCENES=[];
+const S=(id,name,dur,captions,draw)=>SCENES.push({id,name,dur,captions,draw});
+
+/* ---- 01 COLD OPEN ---------------------------------------- */
+S('open','Cold open',15,[
+  [0.4,'No one wrote the sentence you are about to read. A machine estimated it, one fragment at a time.'],
+  [7.5,'Four minutes, no metaphors about brains. Just the actual mechanism.']
+],(t,u)=>{
+  const line='No one wrote this sentence.';
+  typeOn(line,W/2,300,seq(u,.03,.30),{font:`500 46px ${MONO}`,align:'center',fill:C.dim});
+  const a=seq(u,.36,.52);
+  if(a>0){
+    ghostTitle('HOW A LANGUAGE',W/2,470,92,a);
+    ghostTitle('MODEL THINKS',W/2,570,92,seq(u,.42,.58));
+  }
+  const b=seq(u,.60,.75);
+  if(b>0){
+    plot([[W/2-260,620],[W/2+260,620]],b,{stroke:C.amber,w:2});
+    eyebrow('A FOUR-MINUTE TEARDOWN',W/2,668,seq(u,.66,.80));
+  }
+});
+
+/* ---- 02 TOKENS ------------------------------------------- */
+const TOK=[['Language',4092],['▁models',3230],['▁don',1587],["'",6],['t',83],['▁read',1373],['▁words',2456],['.',13]];
+S('tokens','Tokens',27,[
+  [0.3,'First: it never sees words. Text is chopped into tokens — common chunks of characters.'],
+  [7,'"Language" survives whole. "don\'t" shatters into three pieces. Frequency decides.'],
+  [14,'Each token is then swapped for its ID — a row number in a vocabulary of about 100,000 entries.'],
+  [21,'From here on, the model is only ever manipulating numbers.']
+],(t,u)=>{
+  const f=`500 38px ${MONO}`;
+  const gap=lerp(0,20,eOut(seq(u,.16,.36)));
+  const ws=TOK.map(([s])=>measure(s,f)+26);
+  const total=ws.reduce((a,b)=>a+b,0)+gap*(TOK.length-1);
+  let x=W/2-total/2;
+  const flip=seq(u,.52,.80);
+  TOK.forEach(([s,id],i)=>{
+    const w=ws[i], y=400;
+    const st=clamp((flip-i*0.045)/0.35);
+    const sep=seq(u,.16,.36);
+    const col=[C.amber,C.cyan,C.magenta][i%3];
+    chip(x,y-46,w,66,{stroke:sep>.1?col:C.rule,fill:'rgba(255,255,255,.03)',alpha:.9});
+    txt(s,x+w/2,y,{font:f,align:'center',fill:C.ink,alpha:1-st});
+    txt(String(id),x+w/2,y,{font:`600 32px ${MONO}`,align:'center',fill:col,alpha:st});
+    if(sep>.5) txt('tok '+(i+1),x+w/2,y+48,{font:`400 13px ${MONO}`,align:'center',fill:C.dim,alpha:(sep-.5)*2*.7,track:1.5});
+    x+=w+gap;
+  });
+  eyebrow('STEP 01 — TOKENIZE',W/2,250,seq(u,.05,.15));
+  const bar=seq(u,.84,1);
+  if(bar>0){
+    txt('[ 4092, 3230, 1587, 6, 83, 1373, 2456, 13 ]',W/2,560,
+      {font:`500 26px ${MONO}`,align:'center',fill:C.cyan,alpha:bar});
+  }
+});
+
+/* ---- 03 VECTORS ------------------------------------------ */
+const PTS=[
+  ['king',-.55,.42,C.amber],['queen',-.15,.52,C.amber],
+  ['man',-.55,-.10,C.cyan],['woman',-.15,0,C.cyan],
+  ['dog',.42,.34,C.magenta],['puppy',.58,.46,C.magenta],['cat',.62,.18,C.magenta],
+  ['run',.30,-.42,C.dim],['ran',.46,-.50,C.dim],['walk',.14,-.55,C.dim]
+];
+S('vectors','Meaning as position',30,[
+  [0.3,'Each ID becomes a vector — a list of a few thousand numbers, learned during training.'],
+  [7,'Think of it as a coordinate. Words used in similar ways get placed near each other.'],
+  [14,'The geometry carries relationships. King is to queen roughly as man is to woman — the same offset.'],
+  [22,'Nobody labelled any of this. The positions fell out of predicting text.']
+],(t,u)=>{
+  const cx=W/2,cy=470,R=270;
+  const ax=seq(u,.05,.22);
+  plot([[cx-R-70,cy],[cx+R+70,cy]],ax,{stroke:C.rule,w:1,dash:[5,7]});
+  plot([[cx,cy-R-60],[cx,cy+R+60]],ax,{stroke:C.rule,w:1,dash:[5,7]});
+  eyebrow('STEP 02 — EMBED',W/2,190,seq(u,.02,.12));
+  PTS.forEach((p,i)=>{
+    const st=clamp((seq(u,.18,.50)-i*.05)/.4);
+    if(st<=0)return;
+    const x=cx+p[1]*R, y=cy-p[2]*R;
+    ctx.save();ctx.globalAlpha=st;
+    ctx.fillStyle=p[3];ctx.beginPath();ctx.arc(x,y,4.5,0,7);ctx.fill();
+    ctx.restore();
+    txt(p[0],x+12,y+6,{font:`500 21px ${MONO}`,fill:p[3],alpha:st});
+  });
+  const arw=seq(u,.55,.78);
+  if(arw>0){
+    const A=(n)=>{const p=PTS.find(q=>q[0]===n);return [cx+p[1]*R,cy-p[2]*R];};
+    [['king','queen'],['man','woman']].forEach((pair,k)=>{
+      const a=A(pair[0]),b=A(pair[1]);
+      const pr=clamp((arw-k*.15)/.7);
+      plot([a,b],pr,{stroke:C.ink,w:2,alpha:.9});
+      if(pr>.95){
+        const ang=Math.atan2(b[1]-a[1],b[0]-a[0]);
+        ctx.save();ctx.translate(b[0],b[1]);ctx.rotate(ang);ctx.fillStyle=C.ink;
+        ctx.beginPath();ctx.moveTo(0,0);ctx.lineTo(-11,-5);ctx.lineTo(-11,5);ctx.fill();ctx.restore();
+      }
+    });
+    txt('same direction, same distance',cx-R-40,cy+R+50,
+      {font:`400 19px ${MONO}`,fill:C.dim,alpha:seq(u,.72,.86)});
+  }
+});
+
+/* ---- 04 ATTENTION ---------------------------------------- */
+const SENT=['The','trophy','did','n\'t','fit','in','the','suitcase','because','it','was','too'];
+S('attention','Attention',42,[
+  [0.3,'Now the hard part. What does "it" refer to in this sentence?'],
+  [7,'Attention lets every token look at every other token and weight what matters.'],
+  [14,'With "too big", the weight lands on trophy. The trophy is the thing that does not fit.'],
+  [22.5,'Now change one word. Big becomes small.'],
+  [27.5,'The weight jumps to suitcase. Identical grammar. Opposite answer.'],
+  [35,'That re-routing is learned, not coded. It is the single idea that made modern models work.']
+],(t,u)=>{
+  /* phase map
+     .03–.12  words in
+     .14–.30  arc → trophy draws
+     .32–.44  readout 1
+     .50–.58  arc retracts
+     .53      the word changes
+     .58–.74  arc → suitcase draws
+     .76–.88  readout 2                      */
+  const swap=u>=.53;
+  const last=swap?'small':'big';
+  const words=[...SENT,last];
+  const f=`500 30px ${MONO}`;
+  const ws=words.map(w=>measure(w,f)+30);
+  const total=ws.reduce((a,b)=>a+b,0);
+  let x=W/2-total/2; const y=430;
+  const pos=[];
+  words.forEach((w,i)=>{ pos.push([x+ws[i]/2,y]); x+=ws[i]; });
+
+  eyebrow('STEP 03 — ATTEND',W/2,190,seq(u,.02,.09));
+
+  const iIdx=words.indexOf('it');
+  const lastIdx=words.length-1;
+  const tgt=swap?words.indexOf('suitcase'):words.indexOf('trophy');
+  // arc 1 draws, then retracts; arc 2 draws after
+  const arcP=swap? seq(u,.58,.74)
+                 : clamp(seq(u,.14,.30)-seq(u,.46,.53));
+
+  words.forEach((w,i)=>{
+    if(i===iIdx)return;
+    const isT=i===tgt;
+    const a=pos[iIdx],b=pos[i];
+    const lift=90+Math.abs(i-iIdx)*11;
+    const P=[];
+    for(let k=0;k<=26;k++){
+      const s=k/26;
+      P.push([lerp(a[0],b[0],s), y-40-Math.sin(s*Math.PI)*lift]);
+    }
+    plot(P,arcP,{stroke:isT?C.amber:C.cyan,w:isT?3.4:1,alpha:isT?.95:.28});
+  });
+
+  // the word that changes gets its own moment
+  const chg=clamp(seq(u,.46,.52)-seq(u,.62,.72));
+  if(chg>0){
+    chip(pos[lastIdx][0]-ws[lastIdx]/2+4,y-38,ws[lastIdx]-8,56,
+      {stroke:C.magenta,fill:'rgba(255,77,141,.12)',alpha:chg});
+  }
+
+  words.forEach((w,i)=>{
+    const hot=i===tgt, self=i===iIdx;
+    const fill=hot?C.amber:self?C.ink:(i===lastIdx&&chg>0)?C.magenta:C.dim;
+    if(hot||self){
+      chip(pos[i][0]-ws[i]/2+6,y-34,ws[i]-12,48,{stroke:hot?C.amber:C.ink,alpha:arcP*.8});
+    }
+    txt(w,pos[i][0],y,{font:f,align:'center',fill,alpha:seq(u,.03,.12)*(hot||self?1:.85)});
+  });
+
+  // weight readout — one per phase, each held long enough to read
+  const rd=swap?seq(u,.76,.88):clamp(seq(u,.32,.44)-seq(u,.46,.52));
+  if(rd>0){
+    const label=swap?'it → suitcase   0.71':'it → trophy   0.68';
+    txt(label,W/2,600,{font:`600 28px ${MONO}`,align:'center',fill:C.amber,alpha:rd,track:1.5});
+    txt('every other token: under 0.09',W/2,640,
+      {font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:rd*.8});
+  }
+  // brief flash on the change itself
+  const fl=seq(u,.53,.58);
+  if(fl>0&&fl<1){
+    ctx.save();ctx.globalAlpha=(1-fl)*.22;ctx.fillStyle=C.magenta;
+    ctx.fillRect(0,0,W,H);ctx.restore();
+  }
+});
+
+/* ---- 05 DEPTH -------------------------------------------- */
+S('depth','Depth',28,[
+  [0.3,'One pass of attention is not enough. Stack it — dozens of layers, sometimes over a hundred.'],
+  [8,'Each layer rewrites every token\'s vector using context from the layer below.'],
+  [15,'Early layers handle grammar and spelling. Deeper ones carry topic, tone, intent.'],
+  [22,'By the top, the vector for "it" is no longer the word "it". It has become the trophy.']
+],(t,u)=>{
+  eyebrow('STEP 04 — STACK',W/2,150,seq(u,.02,.10));
+  const N=14, bw=520, bh=30, gap=8;
+  const x=W/2-bw/2-140, top=230;
+  for(let i=0;i<N;i++){
+    const st=clamp((seq(u,.06,.42)-(N-1-i)*.05)/.35);
+    if(st<=0)continue;
+    const y=top+(N-1-i)*(bh+gap);
+    chip(x,y,bw*(0.55+0.45*st),bh,{stroke:C.rule,fill:'rgba(79,214,200,.05)',alpha:st});
+    txt((i<9?'0':'')+(i+1),x-42,y+21,{font:`400 15px ${MONO}`,fill:C.dim,alpha:st*.8});
+    txt(i%2?'feed-forward':'self-attention',x+18,y+21,{font:`400 15px ${MONO}`,fill:C.dim,alpha:st*.75});
+  }
+  // travelling signal
+  const p=seq(u,.30,.86);
+  if(p>0){
+    const k=(p*1.6)%1;
+    const y=top+(N-1)*(bh+gap)+bh - k*((N-1)*(bh+gap)+bh);
+    ctx.save();
+    const g=ctx.createLinearGradient(x,y-30,x,y+30);
+    g.addColorStop(0,'rgba(255,176,32,0)');g.addColorStop(.5,'rgba(255,176,32,.5)');
+    g.addColorStop(1,'rgba(255,176,32,0)');
+    ctx.fillStyle=g;ctx.fillRect(x,y-30,bw,60);
+    ctx.strokeStyle=C.amber;ctx.lineWidth=2;ctx.globalAlpha=.9;
+    ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+bw,y);ctx.stroke();
+    ctx.restore();
+  }
+  // right column: the vector resolving
+  const rx=W/2+330;
+  const res=seq(u,.45,.92);
+  txt('vector for "it"',rx,250,{font:`500 19px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.40,.50)});
+  for(let i=0;i<24;i++){
+    const st=seq(u,.42,.55);
+    if(st<=0)continue;
+    const ang=hash(i)*Math.PI*2, rad=lerp(120,0,eInOut(res))*(0.4+hash(i+50)*.9);
+    const jx=rx+Math.cos(ang+t*.25)*rad, jy=430+Math.sin(ang+t*.25)*rad;
+    ctx.save();ctx.globalAlpha=st*(1-res*.75);ctx.fillStyle=C.cyan;
+    ctx.beginPath();ctx.arc(jx,jy,3,0,7);ctx.fill();ctx.restore();
+  }
+  if(res>.5){
+    const a=(res-.5)*2;
+    ctx.save();ctx.globalAlpha=a;ctx.fillStyle=C.amber;
+    ctx.beginPath();ctx.arc(rx,430,7,0,7);ctx.fill();ctx.restore();
+    txt('≈ trophy',rx,490,{font:`600 26px ${MONO}`,align:'center',fill:C.amber,alpha:a});
+  }
+});
+
+/* ---- 06 THE DISTRIBUTION --------------------------------- */
+const DIST=[[' Paris',.912],[' the',.031],[' a',.019],[' located',.011],[' now',.008],[' Lyon',.004],[' famous',.003]];
+S('predict','The distribution',35,[
+  [0.3,'What comes out is not an answer. It is a probability for every token in the vocabulary.'],
+  [7,'One hundred thousand numbers, all summing to one. Most of them nearly zero.'],
+  [14,'Then it samples. Temperature controls how much it is willing to stray from the top pick.'],
+  [22,'Low temperature: safe and repetitive. High: creative and unreliable. Same model, one dial.'],
+  [29,'Pick a token, append it, run the whole thing again. That loop is the entire product.']
+],(t,u)=>{
+  eyebrow('STEP 05 — PREDICT',W/2,150,seq(u,.02,.10));
+  typeOn('The capital of France is',W/2,250,seq(u,.04,.18),
+    {font:`500 34px ${MONO}`,align:'center',fill:C.ink});
+  const bx=W/2-330, by=320, bwMax=560, rh=44;
+  DIST.forEach((d,i)=>{
+    const st=clamp((seq(u,.20,.50)-i*.035)/.3);
+    if(st<=0)return;
+    const y=by+i*rh;
+    txt(d[0].trim(),bx-24,y+22,{font:`500 21px ${MONO}`,align:'right',fill:i?C.dim:C.ink,alpha:st});
+    const w=Math.max(3,bwMax*d[1]*eOut(st));
+    chip(bx,y+4,w,26,{fill:i?'rgba(79,214,200,.55)':C.amber,r:2,alpha:st});
+    txt((d[1]*100).toFixed(1)+'%',bx+w+14,y+23,{font:`400 16px ${MONO}`,fill:C.dim,alpha:st*.85});
+  });
+  txt('+ 99,993 tokens below 0.1%',bx,by+DIST.length*rh+34,
+    {font:`400 17px ${MONO}`,fill:C.dim,alpha:seq(u,.44,.56)*.75});
+
+  // temperature dial
+  const tp=seq(u,.56,1);
+  if(tp>0){
+    const ty=760, tx0=W/2-300, tw=600;
+    plot([[tx0,ty],[tx0+tw,ty]],clamp(tp*4),{stroke:C.rule,w:2});
+    const osc=(Math.sin((u-.56)*10)+1)/2;
+    const k=clamp(eInOut(seq(u,.60,.72))*osc+ .08);
+    const px=tx0+tw*k;
+    ctx.save();ctx.fillStyle=C.magenta;ctx.beginPath();ctx.arc(px,ty,9,0,7);ctx.fill();ctx.restore();
+    txt('temperature 0.0',tx0,ty+40,{font:`400 16px ${MONO}`,fill:C.dim,alpha:tp*.8});
+    txt('2.0',tx0+tw,ty+40,{font:`400 16px ${MONO}`,align:'right',fill:C.dim,alpha:tp*.8});
+    txt(k<.35?'deterministic · repetitive':k<.7?'balanced':'inventive · unreliable',
+      W/2,ty-30,{font:`600 22px ${MONO}`,align:'center',fill:C.magenta,alpha:tp});
+  }
+});
+
+/* ---- 07 TRAINING ----------------------------------------- */
+S('train','Training',30,[
+  [0.3,'Where did any of this come from? Prediction practice, at absurd scale.'],
+  [7,'Hide the next token in a real document. Guess it. Measure how wrong the guess was.'],
+  [14,'Nudge every weight a fraction in the direction that would have been less wrong. Repeat.'],
+  [22,'Trillions of tokens, billions of parameters. Grammar and world knowledge are side effects.']
+],(t,u)=>{
+  eyebrow('STEP 06 — TRAIN',W/2,150,seq(u,.02,.10));
+  const gx=200, gy=650, gw=620, gh=380;
+  plot([[gx,gy-gh],[gx,gy],[gx+gw,gy]],seq(u,.05,.20),{stroke:C.rule,w:1.5});
+  txt('loss',gx-14,gy-gh+6,{font:`400 16px ${MONO}`,align:'right',fill:C.dim,alpha:seq(u,.1,.2)});
+  txt('tokens seen →',gx+gw,gy+30,{font:`400 16px ${MONO}`,align:'right',fill:C.dim,alpha:seq(u,.1,.2)});
+  const curve=[];
+  for(let i=0;i<=180;i++){
+    const s=i/180;
+    const v=Math.exp(-s*3.1)*0.86+0.09+(hash(i)-.5)*0.022*(1-s*.7);
+    curve.push([gx+s*gw, gy-v*gh]);
+  }
+  plot(curve,seq(u,.18,.80),{stroke:C.amber,w:2.5});
+
+  // weight grid — actual gradient descent, not flicker:
+  // discrete synchronized steps, each weight moving monotonically toward
+  // its converged value, step size decaying. Colour encodes the direction
+  // of the nudge, so the whole grid visibly moves one way per parameter.
+  const wx=980, wy=300, cols=12, rows=9, cs=34;
+  const gp=seq(u,.28,.46);
+  const STEPS=36;
+  const prog=seq(u,.30,.94);
+  const stepIdx=Math.floor(prog*STEPS);
+  const k=stepIdx/STEPS;                 // how far through training
+  const settle=eOut(k);                  // big early moves, small late ones
+  const frac=prog*STEPS-stepIdx;
+  const pulse=1-clamp(frac*5);           // flash on the frame after each step
+
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    const st=clamp((gp-(r*cols+c)/(rows*cols))*6);
+    if(st<=0)continue;
+    const n=r*cols+c;
+    const from=hash(n), to=hash(n+7777);
+    const jitter=(hash(n+stepIdx*13)-.5)*0.30*(1-settle);
+    const v=clamp(lerp(from,to,settle)+jitter);
+    const up=to>from;                    // direction of this weight's nudge
+    const x0=wx+c*cs, y0=wy+r*cs, slot=cs-5;
+    // faint well showing the range each weight can occupy
+    ctx.save();
+    ctx.globalAlpha=st*.16;
+    ctx.strokeStyle=C.rule;ctx.lineWidth=1;
+    ctx.strokeRect(x0+.5,y0+.5,slot,slot);
+    ctx.restore();
+    // the weight itself: a tick that migrates to its converged position
+    ctx.save();
+    ctx.globalAlpha=st*(.80+pulse*.20);
+    ctx.fillStyle=up?C.cyan:C.magenta;
+    ctx.fillRect(x0+3, y0+2+(1-v)*(slot-4), slot-6, 3);
+    ctx.restore();
+  }
+  txt('parameters',wx,wy-24,{font:`400 16px ${MONO}`,fill:C.dim,alpha:gp*.8,track:2});
+  if(gp>.6){
+    txt('step '+String(stepIdx).padStart(2,'0')+' / '+STEPS,
+      wx+cols*cs-5,wy-24,{font:`400 15px ${MONO}`,align:'right',fill:C.dim,alpha:gp*.6});
+  }
+
+  // the two halves are the same process: mark where we are on the loss curve
+  if(prog>0&&prog<1){
+    const s=clamp(k);
+    const lv=Math.exp(-s*3.1)*0.86+0.09;
+    ctx.save();
+    ctx.globalAlpha=.9;ctx.fillStyle=C.ink;
+    ctx.beginPath();ctx.arc(gx+s*gw,gy-lv*gh,5,0,7);ctx.fill();
+    ctx.restore();
+  }
+  const counter=seq(u,.30,.95);
+  if(counter>0){
+    const n=Math.floor(eOut(counter)*1_800_000_000_000);
+    txt(n.toLocaleString('en-US')+' tokens',wx,wy+rows*cs+56,
+      {font:`600 26px ${MONO}`,fill:C.ink,alpha:counter});
+    txt('no rules were written by hand',wx,wy+rows*cs+92,
+      {font:`400 18px ${MONO}`,fill:C.dim,alpha:seq(u,.6,.75)});
+  }
+});
+
+/* ---- 08 THE FAILURE MODE --------------------------------- */
+const FAKE=[['Marta Ellingsen',.34],['R. K. Chandra',.27],['Yusuf Bello',.21],['Anne-Marie Dupont',.18]];
+S('fail','Confidently wrong',28,[
+  [0.3,'Which brings us to the failure mode people find hardest to accept.'],
+  [6,'Ask this. The model has no channel for "this premise is false" — only for what looks likely.'],
+  [13,'So it produces name-shaped text with plausible probabilities. There is no Nobel Prize in Ecology.'],
+  [20,'Fluency and truth are separate axes. It optimises the first and only correlates with the second.']
+],(t,u)=>{
+  eyebrow('THE CATCH',W/2,150,seq(u,.02,.10));
+  typeOn('Who won the 1987 Nobel Prize in Ecology?',W/2,255,seq(u,.04,.24),
+    {font:`500 32px ${MONO}`,align:'center',fill:C.ink});
+  const bx=W/2-260, by=350, rh=52;
+  FAKE.forEach((d,i)=>{
+    const st=clamp((seq(u,.28,.54)-i*.05)/.3);
+    if(st<=0)return;
+    const y=by+i*rh;
+    txt(d[0],bx-24,y+24,{font:`500 22px ${MONO}`,align:'right',fill:C.ink,alpha:st});
+    chip(bx,y+6,Math.max(3,420*d[1]*eOut(st)),28,{fill:'rgba(255,77,141,.6)',r:2,alpha:st});
+    txt((d[1]*100).toFixed(0)+'%',bx+420*d[1]+16,y+26,{font:`400 16px ${MONO}`,fill:C.dim,alpha:st*.8});
+  });
+  const rev=seq(u,.58,.72);
+  if(rev>0){
+    ctx.save();ctx.globalAlpha=rev*.9;
+    ctx.strokeStyle=C.amber;ctx.lineWidth=3;
+    ctx.beginPath();ctx.moveTo(bx-320,by-6);ctx.lineTo(bx+480,by+FAKE.length*rh+4);ctx.stroke();
+    ctx.restore();
+    ghostTitle('THERE IS NO NOBEL PRIZE',W/2,660,52,seq(u,.62,.76));
+    ghostTitle('IN ECOLOGY',W/2,720,52,seq(u,.66,.80));
+  }
+  const fin=seq(u,.82,.96);
+  if(fin>0) txt('fluent ≠ true',W/2,800,{font:`600 26px ${MONO}`,align:'center',fill:C.dim,alpha:fin,track:3});
+});
+
+/* ---- 09 CLOSE -------------------------------------------- */
+const RECAP=['tokenize','embed','attend','stack','predict','sample'];
+S('close','Close',18,[
+  [0.3,'Six steps. Tokenize, embed, attend, stack, predict, sample — then do it again for the next word.'],
+  [8,'It is not a mind. It is an extraordinarily detailed map of how people write.'],
+  [13,'Which is less magical, and far more useful to know.']
+],(t,u)=>{
+  const f=`500 24px ${MONO}`;
+  const ws=RECAP.map(s=>measure(s,f)+44);
+  const total=ws.reduce((a,b)=>a+b,0)+12*(RECAP.length-1);
+  let x=W/2-total/2;
+  RECAP.forEach((s,i)=>{
+    const st=clamp((seq(u,.05,.42)-i*.055)/.3);
+    const y=330+ (1-eBack(clamp(st)))*40;
+    if(st>0){
+      chip(x,y-34,ws[i],52,{stroke:C.rule,fill:'rgba(255,176,32,.07)',alpha:st});
+      txt(s,x+ws[i]/2,y,{font:f,align:'center',fill:C.amber,alpha:st});
+    }
+    x+=ws[i]+12;
+  });
+  const a=seq(u,.48,.66);
+  if(a>0){
+    ghostTitle('NOT A MIND.',W/2,520,74,a);
+    ghostTitle('A MAP OF HOW WE WRITE.',W/2,610,74,seq(u,.54,.72));
+  }
+  const b=seq(u,.76,.9);
+  if(b>0){
+    plot([[W/2-200,670],[W/2+200,670]],b,{stroke:C.amber,w:2});
+    eyebrow('END',W/2,720,seq(u,.82,.94),C.dim);
+  }
+});
+
+/* ============================================================
+   TIMELINE
+   ============================================================ */
+let acc=0;
+for(const s of SCENES){ s.start=acc; acc+=s.dur; }
+const DUR=acc;
+let T=0, playing=false, rate=1, lastRAF=0;
+let voOn=false, spoken=-1;
+
+function sceneAt(t){
+  for(let i=SCENES.length-1;i>=0;i--) if(t>=SCENES[i].start) return [SCENES[i],i];
+  return [SCENES[0],0];
+}
+function draw(t){
+  const r=cv.getBoundingClientRect();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle=C.deep; ctx.fillRect(0,0,r.width,r.height);
+  ctx.save();
+  ctx.setTransform(DPR,0,0,DPR,ox*DPR,oy*DPR);
+  ctx.scale(scale,scale);
+  ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();
+  backdrop(t);
+  const [sc]=sceneAt(t);
+  const local=t-sc.start;
+  sc.draw(local, clamp(local/sc.dur));
+  // cross-fade to black between scenes
+  const tail=sc.dur-local;
+  if(tail<0.55){ ctx.globalAlpha=(0.55-tail)/0.55*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  if(local<0.45){ ctx.globalAlpha=(0.45-local)/0.45*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  vignette();
+  ctx.restore();
+}
+
+/* ---------- captions + chapter ---------- */
+const capText=document.getElementById('capText');
+const chNum=document.getElementById('chNum'), chName=document.getElementById('chName');
+let curCap='';
+function sync(t){
+  const [sc,idx]=sceneAt(t);
+  const local=t-sc.start;
+  let line='', li=-1;
+  sc.captions.forEach((c,i)=>{ if(local>=c[0]){ line=c[1]; li=i; } });
+  if(line!==curCap){ curCap=line; capText.style.opacity=0;
+    setTimeout(()=>{capText.textContent=curCap;capText.style.opacity=1;},120); }
+  chNum.textContent=String(idx+1).padStart(2,'0');
+  chName.textContent=sc.name;
+  const key=idx*100+li;
+  if(voOn&&playing&&li>=0&&key!==spoken){
+    spoken=key;
+    try{ speechSynthesis.cancel();
+      const utt=new SpeechSynthesisUtterance(line);
+      utt.rate=1.0; utt.pitch=1; speechSynthesis.speak(utt);
+    }catch(e){}
+  }
+  fill.style.width=(t/DUR*100)+'%';
+  knob.style.left=(t/DUR*100)+'%';
+  track.setAttribute('aria-valuenow',Math.round(t));
+  clock.innerHTML='<b>'+fmt(t)+'</b> / '+fmt(DUR);
+}
+const fmt=s=>Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+
+/* ---------- loop ---------- */
+function loop(ts){
+  requestAnimationFrame(loop);
+  const dt=Math.min((ts-lastRAF)/1000||0,.05); lastRAF=ts;
+  if(playing){
+    T+=dt*rate;
+    if(T>=DUR){ T=DUR; setPlay(false); }
+  }
+  draw(T); sync(T);
+}
+requestAnimationFrame(loop);
+
+/* ---------- transport ---------- */
+const play=document.getElementById('play'), bigplay=document.getElementById('bigplay');
+const track=document.getElementById('track'), fill=document.getElementById('fill'),
+      knob=document.getElementById('knob'), clock=document.getElementById('clock');
+
+SCENES.forEach(s=>{ if(!s.start)return;
+  const d=document.createElement('div'); d.className='tick';
+  d.style.left=(s.start/DUR*100)+'%'; track.appendChild(d);
+});
+
+function setPlay(p){
+  playing=p;
+  play.textContent=p?'❚❚ Pause':'▶ Play';
+  bigplay.hidden=p||T>0;
+  if(!p){ try{speechSynthesis.cancel();}catch(e){} }
+  if(p&&T>=DUR){ T=0; }
+}
+play.onclick=()=>setPlay(!playing);
+bigplay.onclick=()=>{ T=0; setPlay(true); };
+document.getElementById('back').onclick=()=>seek(T-10);
+document.getElementById('fwd').onclick=()=>seek(T+10);
+
+const RATES=[1,1.5,.5,.75];let ri=0;
+document.getElementById('speed').onclick=e=>{ ri=(ri+1)%RATES.length; rate=RATES[ri]; e.target.textContent=rate.toFixed(1)+'×'; };
+document.getElementById('capbtn').onclick=e=>{
+  const on=e.target.getAttribute('aria-pressed')==='true';
+  e.target.setAttribute('aria-pressed',!on); document.body.classList.toggle('nocap',on);
+};
+document.getElementById('vo').onclick=e=>{
+  voOn=e.target.getAttribute('aria-pressed')!=='true';
+  e.target.setAttribute('aria-pressed',voOn);
+  if(!voOn){try{speechSynthesis.cancel();}catch(err){}} else spoken=-1;
+};
+document.getElementById('full').onclick=()=>{
+  const el=document.documentElement;
+  if(document.fullscreenElement) document.exitFullscreen();
+  else el.requestFullscreen&&el.requestFullscreen();
+};
+
+function seek(t){ T=clamp(t,0,DUR); spoken=-1; try{speechSynthesis.cancel();}catch(e){} bigplay.hidden=true; draw(T); sync(T); }
+function fromEvent(e){
+  const r=track.getBoundingClientRect();
+  const cx=(e.touches?e.touches[0].clientX:e.clientX);
+  seek((cx-r.left)/r.width*DUR);
+}
+let drag=false;
+track.addEventListener('pointerdown',e=>{drag=true;track.setPointerCapture(e.pointerId);fromEvent(e);});
+track.addEventListener('pointermove',e=>{if(drag)fromEvent(e);});
+track.addEventListener('pointerup',e=>{drag=false;});
+track.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'){seek(T-5);e.preventDefault();}
+  if(e.key==='ArrowRight'){seek(T+5);e.preventDefault();}
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='BUTTON'&&e.key===' ')return;
+  if(e.key===' '){setPlay(!playing);e.preventDefault();}
+  if(e.key==='ArrowLeft')seek(T-10);
+  if(e.key==='ArrowRight')seek(T+10);
+  if(e.key==='f'||e.key==='F')document.getElementById('full').click();
+});
+
+/* fonts settle → repaint */
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>{resize();});
+resize(); sync(0);
+</script>
+</body>
+</html>
