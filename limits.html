@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Pipeline Limitations — Know Before You Launch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#0B1026;
+    --paper-2:#0E1533;
+    --ink:#F3EFE6;
+    --ink-dim:#8E96B8;
+    --rule:#26305C;
+    --amber:#FFB020;
+    --magenta:#FF4D8D;
+    --cyan:#4FD6C8;
+    --red:#E63946;
+    --display:'Bricolage Grotesque','Archivo',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;
+  }
+  #shell{
+    width:100%;height:100%;max-width:1600px;
+    display:flex;flex-direction:column;
+    padding:clamp(8px,1.6vmin,22px);gap:clamp(8px,1.4vmin,16px);
+  }
+  #top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-height:20px}
+  #mark{
+    font-family:var(--display);font-weight:800;
+    font-size:clamp(11px,1.5vmin,15px);letter-spacing:.16em;text-transform:uppercase;
+  }
+  #mark b{color:var(--red);font-weight:800}
+  #chapter{
+    font-size:clamp(10px,1.35vmin,13px);color:var(--ink-dim);letter-spacing:.1em;
+    text-transform:uppercase;margin-left:auto;text-align:right;
+  }
+  #chapter em{color:var(--ink);font-style:normal}
+  #stage{
+    position:relative;flex:1;min-height:0;
+    border:1px solid var(--rule);border-radius:2px;
+    background:var(--paper-2);overflow:hidden;
+  }
+  canvas{display:block;width:100%;height:100%}
+  #cap{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:clamp(14px,3vmin,34px) clamp(16px,5vmin,72px);
+    background:linear-gradient(to top,rgba(11,16,38,.94) 30%,rgba(11,16,38,0));
+    pointer-events:none;
+  }
+  #cap p{
+    margin:0;font-size:clamp(12px,1.95vmin,19px);line-height:1.5;
+    max-width:62ch;color:var(--ink);
+    text-wrap:balance;
+    transition:opacity .28s ease;
+  }
+  #cap p::before{
+    content:"";display:inline-block;width:1.6em;height:1px;
+    background:var(--red);vertical-align:middle;margin-right:.7em;
+    transform:translateY(-1px);
+  }
+  body.nocap #cap{display:none}
+  #bigplay{
+    position:absolute;inset:0;display:grid;place-items:center;
+    background:rgba(11,16,38,.72);border:0;cursor:pointer;
+    color:var(--ink);font-family:var(--display);font-weight:800;
+    letter-spacing:.14em;text-transform:uppercase;font-size:clamp(12px,1.7vmin,16px);
+  }
+  #bigplay span{
+    border:1px solid var(--red);color:var(--red);
+    padding:.85em 1.8em;border-radius:2px;
+  }
+  #bigplay:hover span{background:var(--red);color:var(--paper)}
+  #bigplay[hidden]{display:none}
+  #bar{display:flex;flex-direction:column;gap:clamp(6px,1vmin,10px)}
+  #track{
+    position:relative;height:26px;cursor:pointer;touch-action:none;
+    display:flex;align-items:center;
+  }
+  #rail{position:absolute;left:0;right:0;height:3px;background:var(--rule)}
+  #fill{position:absolute;left:0;height:3px;background:var(--red);width:0}
+  #knob{
+    position:absolute;width:2px;height:15px;background:var(--ink);
+    left:0;transform:translateX(-1px);
+  }
+  .tick{position:absolute;width:1px;height:9px;background:#3C4880;top:50%;transform:translateY(-50%)}
+  #track:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}
+  #ctrls{display:flex;align-items:center;gap:clamp(6px,1.1vmin,12px);flex-wrap:wrap}
+  button.t{
+    font-family:var(--mono);font-size:clamp(10px,1.35vmin,13px);
+    letter-spacing:.09em;text-transform:uppercase;
+    background:transparent;color:var(--ink-dim);
+    border:1px solid var(--rule);border-radius:2px;
+    padding:.62em 1em;cursor:pointer;transition:.15s;white-space:nowrap;
+  }
+  button.t:hover{color:var(--ink);border-color:var(--ink-dim)}
+  button.t[aria-pressed="true"]{color:var(--paper);background:var(--ink);border-color:var(--ink)}
+  button.t:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+  #play{color:var(--paper);background:var(--red);border-color:var(--red);min-width:7.5em;font-weight:600}
+  #play:hover{background:#ff5555}
+  #clock{
+    font-size:clamp(10px,1.35vmin,13px);color:var(--ink-dim);
+    letter-spacing:.06em;margin-left:auto;font-variant-numeric:tabular-nums;
+  }
+  #clock b{color:var(--ink);font-weight:500}
+  .hint{font-size:clamp(9px,1.2vmin,12px);color:#5A6494;letter-spacing:.06em}
+  @media (max-width:720px){ .wide{display:none} #clock{margin-left:auto} }
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="top">
+    <div id="mark">Pipeline <b>Limitations</b></div>
+    <div id="chapter"><em id="chNum">01</em> · <span id="chName">Cold open</span></div>
+  </div>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="cap"><p id="capText"></p></div>
+    <button id="bigplay"><span>▶ Play film · 3:30</span></button>
+  </div>
+
+  <div id="bar">
+    <div id="track" tabindex="0" role="slider" aria-label="Timeline" aria-valuemin="0" aria-valuemax="210" aria-valuenow="0">
+      <div id="rail"></div><div id="fill"></div><div id="knob"></div>
+    </div>
+    <div id="ctrls">
+      <button class="t" id="play">▶ Play</button>
+      <button class="t" id="back">◀◀ 10s</button>
+      <button class="t" id="fwd">10s ▶▶</button>
+      <button class="t" id="speed">1.0×</button>
+      <button class="t" id="capbtn" aria-pressed="true">Captions</button>
+      <button class="t" id="vo" aria-pressed="false">Narration</button>
+      <button class="t wide" id="full">Fullscreen</button>
+      <div id="clock"><b>0:00</b> / 3:30</div>
+    </div>
+    <div class="hint wide">Space play · ← → skip 10s · F fullscreen</div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = 1600, H = 900;
+let DPR = 1, ox = 0, oy = 0, scale = 1;
+
+function resize(){
+  const r = cv.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(r.width * DPR);
+  cv.height = Math.round(r.height * DPR);
+  scale = Math.min(r.width / W, r.height / H);
+  ox = (r.width - W * scale) / 2;
+  oy = (r.height - H * scale) / 2;
+  draw(T);
+}
+new ResizeObserver(resize).observe(document.getElementById('stage'));
+
+const C = {
+  paper:'#0E1533', ink:'#F3EFE6', dim:'#8E96B8', rule:'#26305C',
+  red:'#E63946', cyan:'#4FD6C8', amber:'#FFB020', deep:'#0B1026'
+};
+const DISPLAY = '"Bricolage Grotesque","Archivo",system-ui,sans-serif';
+const MONO = '"IBM Plex Mono",ui-monospace,Menlo,monospace';
+
+const clamp=(v,a=0,b=1)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const seq=(u,a,b)=>clamp((u-a)/(b-a));
+const eOut=t=>1-Math.pow(1-t,3);
+const eIn=t=>t*t*t;
+const eInOut=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+function hash(n){ let x=Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+
+function txt(s,x,y,o={}){
+  ctx.save();
+  ctx.font=o.font||`400 24px ${MONO}`;
+  ctx.fillStyle=o.fill||C.ink;
+  ctx.textAlign=o.align||'left';
+  ctx.textBaseline=o.baseline||'alphabetic';
+  ctx.globalAlpha=o.alpha===undefined?1:clamp(o.alpha);
+  if(o.track){ 
+    const chars=[...s]; let total=0;
+    for(const ch of chars) total+=ctx.measureText(ch).width+o.track;
+    total-=o.track;
+    let cx = o.align==='center'? x-total/2 : o.align==='right'? x-total : x;
+    ctx.textAlign='left';
+    for(const ch of chars){ ctx.fillText(ch,cx,y); cx+=ctx.measureText(ch).width+o.track; }
+  } else ctx.fillText(s,x,y);
+  ctx.restore();
+}
+function measure(s,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(s).width; ctx.restore(); return w; }
+
+function ghostTitle(s,x,y,size,alpha=1,align='center',color=C.red){
+  const f=`800 ${size}px ${DISPLAY}`;
+  const tr=size*0.01;
+  txt(s,x-3,y+2,{font:f,fill:C.cyan,align,alpha:alpha*.55,track:tr});
+  txt(s,x+3,y-2,{font:f,fill:C.magenta,align,alpha:alpha*.5,track:tr});
+  txt(s,x,y,{font:f,fill:color,align,alpha,track:tr});
+}
+
+function plot(pts,p,o={}){
+  if(pts.length<2||p<=0)return;
+  let total=0; const seg=[];
+  for(let i=1;i<pts.length;i++){
+    const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+    seg.push(d); total+=d;
+  }
+  const target=total*clamp(p);
+  ctx.save();
+  ctx.strokeStyle=o.stroke||C.ink; ctx.lineWidth=o.w||1.5;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.globalAlpha=o.alpha===undefined?1:o.alpha;
+  if(o.dash)ctx.setLineDash(o.dash);
+  ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+  let acc=0;
+  for(let i=1;i<pts.length;i++){
+    if(acc+seg[i-1]<=target){ ctx.lineTo(pts[i][0],pts[i][1]); acc+=seg[i-1]; }
+    else{
+      const k=(target-acc)/seg[i-1];
+      ctx.lineTo(lerp(pts[i-1][0],pts[i][0],k),lerp(pts[i-1][1],pts[i][1],k));
+      break;
+    }
+  }
+  ctx.stroke(); ctx.restore();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  const k=Math.min(r,w/2,h/2);
+  ctx.moveTo(x+k,y); ctx.arcTo(x+w,y,x+w,y+h,k); ctx.arcTo(x+w,y+h,x,y+h,k);
+  ctx.arcTo(x,y+h,x,y,k); ctx.arcTo(x,y,x+w,y,k); ctx.closePath();
+}
+function chip(x,y,w,h,{fill,stroke,alpha=1,r=3}={}){
+  ctx.save(); ctx.globalAlpha=alpha;
+  rr(x,y,w,h,r);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.25;ctx.stroke();}
+  ctx.restore();
+}
+function typeOn(s,x,y,p,o={}){
+  const n=Math.floor(clamp(p)*s.length+.0001);
+  const shown=s.slice(0,n);
+  txt(shown,x,y,o);
+  if(p<1&&p>0){
+    const f=o.font||`400 24px ${MONO}`;
+    const wAll=measure(shown,f);
+    const cx=o.align==='center'?x-measure(s,f)/2+wAll:o.align==='right'?x-measure(s,f)+wAll:x+wAll;
+    const sz=parseInt(f)||24;
+    ctx.save();ctx.globalAlpha=.9;ctx.fillStyle=C.red;
+    ctx.fillRect(cx+3,y-sz*.78,sz*.5,sz*.9);ctx.restore();
+  }
+}
+function eyebrow(s,x,y,alpha=1,color=C.red,align='center'){
+  txt(s,x,y,{font:`500 15px ${MONO}`,fill:color,alpha,track:3.2,align});
+}
+
+function backdrop(t){
+  ctx.fillStyle=C.paper; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalAlpha=.5; ctx.fillStyle='#1A2247';
+  for(let x=40;x<W;x+=40) for(let y=40;y<H;y+=40) ctx.fillRect(x,y,1.2,1.2);
+  ctx.restore();
+  ctx.save(); ctx.globalAlpha=.35; ctx.strokeStyle=C.rule; ctx.lineWidth=1;
+  const yy=H/2+Math.sin(t*.18)*70;
+  ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(W,yy);ctx.stroke(); ctx.restore();
+}
+function vignette(){
+  const g=ctx.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.95);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(6,9,24,.75)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+const SCENES=[];
+const S=(id,name,dur,captions,draw)=>SCENES.push({id,name,dur,captions,draw});
+
+/* 01 - COLD OPEN */
+S('open','Cold open',18,[
+  [0.4,'Your pipeline has limits. Not bugs—design constraints.'],
+  [8,'Knowing them now saves frustration later. Three minutes, no fluff.']
+],(t,u)=>{
+  const line='Your pipeline has limits.';
+  typeOn(line,W/2,300,seq(u,.03,.30),{font:`500 46px ${MONO}`,align:'center',fill:C.dim});
+  const a=seq(u,.36,.52);
+  if(a>0){
+    ghostTitle('WHAT YOU NEED',W/2,470,92,a,undefined,C.red);
+    ghostTitle('TO KNOW',W/2,570,92,seq(u,.42,.58));
+  }
+  const b=seq(u,.60,.75);
+  if(b>0){
+    plot([[W/2-260,620],[W/2+260,620]],b,{stroke:C.red,w:2});
+    eyebrow('THREE-MINUTE REALITY CHECK',W/2,668,seq(u,.66,.80));
+  }
+});
+
+/* 02 - WHAT WORKS */
+S('works','What works',22,[
+  [0.3,'The pipeline does five things really well.'],
+  [5,'One-click deploy. Payment processing. Email capture. Landing pages.'],
+  [12,'These work because they require no ongoing authentication. You set them once, they run forever.'],
+  [18,'Gumroad handles money. Netlify handles hosting. Email goes to Mailchimp. Decoupled systems.']
+],(t,u)=>{
+  eyebrow('WHAT WORKS',W/2,150,seq(u,.02,.10),C.amber);
+  const items=[
+    ['Deploy to Netlify',80,320,C.amber],
+    ['Collect payments',320,320,C.cyan],
+    ['Capture emails',560,320,C.magenta],
+    ['Host the film',800,320,C.amber],
+    ['Track signups',80,460,C.cyan]
+  ];
+  items.forEach((item,i)=>{
+    const st=clamp((seq(u,.08,.50)-i*.06)/.35);
+    if(st<=0)return;
+    const [label,x,y,col]=item;
+    chip(x-80,y-20,160,50,{stroke:col,fill:'rgba(255,255,255,.03)',alpha:st});
+    txt(label,x,y+12,{font:`500 18px ${MONO}`,align:'center',fill:col,alpha:st});
+  });
+  if(seq(u,.50,.72)>0){
+    txt('✓ All decoupled. One setup, infinite runs.',W/2,600,
+      {font:`400 22px ${MONO}`,align:'center',fill:C.amber,alpha:seq(u,.50,.72)});
+  }
+});
+
+/* 03 - CLAUDE CANT AUTH */
+S('noauth','Claude cannot authenticate',20,[
+  [0.3,'Claude has no persistent memory between conversations.'],
+  [7,'Cannot store API keys. Cannot hold tokens. Cannot authenticate independently.'],
+  [13,'This is intentional. It\'s a safety feature. It also means: no autonomous pushing to platforms.']
+],(t,u)=>{
+  eyebrow('THE FIRST LIMIT',W/2,150,seq(u,.02,.10),C.red);
+  const title='Claude Cannot Store Credentials';
+  ghostTitle(title,W/2,300,64,seq(u,.08,.28),undefined,C.red);
+  
+  const reasons=[
+    'No session storage',
+    'No memory between talks',
+    'No persistent files',
+    'No env variables'
+  ];
+  const sx=W/2-320, sy=380;
+  reasons.forEach((r,i)=>{
+    const st=clamp((seq(u,.30,.60)-i*.065)/.25);
+    if(st<=0)return;
+    const y=sy+i*60;
+    chip(sx,y-22,640,44,{stroke:C.red,fill:'rgba(230,57,70,.08)',alpha:st});
+    txt('✗ '+r,sx+20,y+10,{font:`500 22px ${MONO}`,fill:C.red,alpha:st});
+  });
+  if(seq(u,.62,.78)>0){
+    txt('Workaround: You provide tokens once. Claude uses them in this conversation only.',
+      W/2,620,{font:`400 20px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.62,.78)});
+  }
+});
+
+/* 04 - NO REAL-TIME */
+S('nostream','No streaming or webhooks',20,[
+  [0.3,'Claude cannot listen to webhooks or maintain open connections.'],
+  [8,'No long-polling. No server-side events. No subscription model in Claude itself.'],
+  [15,'The pipeline is fire-and-forget. You trigger it, it runs once, conversation ends.']
+],(t,u)=>{
+  eyebrow('THE SECOND LIMIT',W/2,150,seq(u,.02,.10),C.red);
+  
+  // Timeline illustration
+  const timeline=[
+    ['Start',150,0.1],
+    ['Triggered',450,0.2],
+    ['Processing',750,0.35],
+    ['Done',1050,0.5],
+    ['Conversation Ends',1350,0.68]
+  ];
+  const ty=350;
+  plot([[100,ty],[1500,ty]],seq(u,.05,.18),{stroke:C.rule,w:1});
+  
+  timeline.forEach((item,i)=>{
+    const [label,x,st_seq]=item;
+    const st=seq(u,st_seq,st_seq+0.15);
+    if(st<=0)return;
+    ctx.save();ctx.globalAlpha=st;ctx.fillStyle=C.red;
+    ctx.beginPath();ctx.arc(x,ty,6,0,7);ctx.fill();ctx.restore();
+    txt(label,x,ty+50,{font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:st});
+  });
+  
+  if(seq(u,.52,.72)>0){
+    ghostTitle('FIRE AND FORGET',W/2,650,56,seq(u,.52,.72),undefined,C.red);
+  }
+  if(seq(u,.70,.82)>0){
+    txt('No ongoing connection after deployment',W/2,720,
+      {font:`400 19px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.70,.82)});
+  }
+});
+
+/* 05 - SCALE LIMITS */
+S('scale','Bandwidth & quota limits',22,[
+  [0.3,'Free tier hosting has limits. Gumroad has transaction limits. Mailchimp has subscriber caps.'],
+  [8,'You won\'t hit them with 1,000 users. You might at 100,000. This is normal.'],
+  [15,'Plan for it: upgrade tiers when traffic climbs. Not a pipeline flaw—just physics.']
+],(t,u)=>{
+  eyebrow('THE THIRD LIMIT',W/2,150,seq(u,.02,.10),C.red);
+  
+  const limits=[
+    {label:'Netlify Free',cap:'100GB/mo',x:300,col:C.amber},
+    {label:'Gumroad',cap:'100k txn/mo',x:700,col:C.cyan},
+    {label:'Mailchimp',cap:'500 contacts',x:1100,col:C.magenta}
+  ];
+  limits.forEach((lim,i)=>{
+    const st=clamp((seq(u,.08,.40)-i*.08)/.25);
+    if(st<=0)return;
+    const y=320;
+    chip(lim.x-80,y-50,160,100,{stroke:lim.col,fill:`rgba(${lim.col},0.05)`,alpha:st});
+    txt(lim.label,lim.x,y-10,{font:`600 18px ${MONO}`,align:'center',fill:lim.col,alpha:st});
+    txt(lim.cap,lim.x,y+25,{font:`500 22px ${MONO}`,align:'center',fill:lim.col,alpha:st});
+  });
+  
+  const growth=seq(u,.45,.75);
+  if(growth>0){
+    const pts=[];
+    for(let i=0;i<=100;i++){
+      const s=i/100;
+      pts.push([200+s*1200, 600-Math.pow(s,1.5)*300]);
+    }
+    plot(pts,growth,{stroke:C.red,w:2.5});
+    txt('users over time',W/2,650,{font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:growth*.8});
+  }
+});
+
+/* 06 - CUSTOMIZATION CEILING */
+S('custom','Customization has limits',21,[
+  [0.3,'The landing page HTML is yours to edit. But the payment gateway? That\'s locked to Gumroad\'s terms.'],
+  [8,'You can\'t inject tracking code on Stripe\'s checkout. Can\'t customize Mailchimp\'s signup.'],
+  [15,'These platforms own their UX. You own yours. That\'s the tradeoff for zero backend.']
+],(t,u)=>{
+  eyebrow('THE FOURTH LIMIT',W/2,150,seq(u,.02,.10),C.red);
+  
+  const you_own=seq(u,.08,.30);
+  const they_own=seq(u,.32,.54);
+  
+  if(you_own>0){
+    chip(150,280,600,140,{stroke:C.amber,fill:'rgba(255,176,32,.08)',alpha:you_own});
+    txt('YOU OWN',200,320,{font:`600 18px ${MONO}`,fill:C.amber,alpha:you_own});
+    txt('Landing page\nEmail form\nFilm player\nLayout & colors',200,360,{font:`400 16px ${MONO}`,fill:C.amber,alpha:you_own});
+  }
+  
+  if(they_own>0){
+    chip(850,280,600,140,{stroke:C.red,fill:'rgba(230,57,70,.08)',alpha:they_own});
+    txt('THEY OWN',900,320,{font:`600 18px ${MONO}`,fill:C.red,alpha:they_own});
+    txt('Payment checkout\nEmail delivery\nSubscriber UX\nTransaction records',900,360,{font:`400 16px ${MONO}`,fill:C.red,alpha:they_own});
+  }
+  
+  if(seq(u,.58,.76)>0){
+    txt('Tradeoff: No backend to maintain. No control over those flows.',W/2,620,
+      {font:`400 20px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.58,.76)});
+  }
+});
+
+/* 07 - ANALYTICS */
+S('analytics','Limited analytics',18,[
+  [0.3,'You get email signup counts. Payment dashboard. But no cohort analysis. No user funnels.'],
+  [9,'Gumroad and Mailchimp report their own data. They don\'t talk to each other.'],
+  [14,'You can add Google Analytics, but you won\'t see which signups converted to paying customers.']
+],(t,u)=>{
+  eyebrow('THE FIFTH LIMIT',W/2,150,seq(u,.02,.10),C.red);
+  
+  // Three silos
+  const silos=[
+    ['Netlify','visits\ndownloads',150,C.amber],
+    ['Mailchimp','signups\nopen rate',600,C.cyan],
+    ['Gumroad','sales\nrevenue',1050,C.magenta]
+  ];
+  silos.forEach((silo,i)=>{
+    const st=clamp((seq(u,.10,.45)-i*.08)/.25);
+    if(st<=0)return;
+    const [label,data,x,col]=silo;
+    chip(x-90,280,180,120,{stroke:col,fill:`rgba(${col},0.05)`,alpha:st});
+    txt(label,x,300,{font:`600 18px ${MONO}`,align:'center',fill:col,alpha:st});
+    txt(data,x,360,{font:`400 14px ${MONO}`,align:'center',fill:col,alpha:st*.7});
+  });
+  
+  // Gap between them
+  const gap=seq(u,.48,.68);
+  if(gap>0){
+    plot([[300,420],[600,420]],gap,{stroke:C.red,w:1,dash:[4,4]});
+    plot([[750,420],[1050,420]],gap,{stroke:C.red,w:1,dash:[4,4]});
+    txt('disconnected',W/2,480,{font:`500 18px ${MONO}`,align:'center',fill:C.red,alpha:gap});
+  }
+});
+
+/* 08 - WORKAROUNDS */
+S('fixes','The workarounds',25,[
+  [0.3,'Every limit has a fix. Just not zero-effort.'],
+  [6,'Add a simple backend if you need webhooks. Use a tool like Zapier to connect platforms.'],
+  [12,'Upgrade to paid tiers when you scale. Add Google Analytics for deeper insights.'],
+  [18,'Claude can help architect these fixes, but you implement them. That\'s the honest tradeoff.'],
+  [23,'No magic. No free tier that does everything. Pick your tradeoffs.']
+],(t,u)=>{
+  eyebrow('THE REALITY',W/2,150,seq(u,.02,.10),C.amber);
+  
+  const fixes=[
+    ['Add backend',150,'webhook support'],
+    ['Use Zapier',450,'connect platforms'],
+    ['Upgrade tiers',750,'handle growth'],
+    ['Custom analytics',1050,'deeper insights']
+  ];
+  fixes.forEach((fix,i)=>{
+    const st=clamp((seq(u,.12,.52)-i*.08)/.28);
+    if(st<=0)return;
+    const [title,x,desc]=fix;
+    chip(x-80,300,160,80,{stroke:C.amber,fill:'rgba(255,176,32,.08)',alpha:st});
+    txt(title,x,330,{font:`600 16px ${MONO}`,align:'center',fill:C.amber,alpha:st});
+    txt(desc,x,370,{font:`400 12px ${MONO}`,align:'center',fill:C.dim,alpha:st*.8});
+  });
+  
+  if(seq(u,.56,.80)>0){
+    ghostTitle('NO MAGIC.',W/2,620,52,seq(u,.56,.76),undefined,C.amber);
+    ghostTitle('PICK YOUR TRADEOFFS.',W/2,700,52,seq(u,.60,.80));
+  }
+});
+
+/* 09 - CLOSE */
+S('close','Know your limits',15,[
+  [0.3,'The pipeline works if you understand what it is: simple, decoupled, stateless.'],
+  [8,'It breaks if you expect it to be: autonomous, integrated, persistent.'],
+  [12,'Know the difference. Build accordingly.']
+],(t,u)=>{
+  const f=`500 24px ${MONO}`;
+  const labels=['Simple','Decoupled','Stateless'];
+  const ws=labels.map(s=>measure(s,f)+44);
+  const total=ws.reduce((a,b)=>a+b,0)+12*(labels.length-1);
+  let x=W/2-total/2;
+  labels.forEach((s,i)=>{
+    const st=clamp((seq(u,.05,.35)-i*.055)/.25);
+    const y=330+(1-eOut(clamp(st)))*40;
+    if(st>0){
+      chip(x,y-34,ws[i],52,{stroke:C.amber,fill:'rgba(255,176,32,.07)',alpha:st});
+      txt(s,x+ws[i]/2,y,{font:f,align:'center',fill:C.amber,alpha:st});
+    }
+    x+=ws[i]+12;
+  });
+  
+  const a=seq(u,.40,.60);
+  if(a>0){
+    ghostTitle('KNOW THE LIMITS.',W/2,500,72,a,undefined,C.red);
+    ghostTitle('BUILD ACCORDINGLY.',W/2,600,72,seq(u,.46,.66));
+  }
+});
+
+let acc=0;
+for(const s of SCENES){ s.start=acc; acc+=s.dur; }
+const DUR=acc;
+let T=0, playing=false, rate=1, lastRAF=0;
+let voOn=false, spoken=-1;
+
+function sceneAt(t){
+  for(let i=SCENES.length-1;i>=0;i--) if(t>=SCENES[i].start) return [SCENES[i],i];
+  return [SCENES[0],0];
+}
+function draw(t){
+  const r=cv.getBoundingClientRect();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle=C.deep; ctx.fillRect(0,0,r.width,r.height);
+  ctx.save();
+  ctx.setTransform(DPR,0,0,DPR,ox*DPR,oy*DPR);
+  ctx.scale(scale,scale);
+  ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();
+  backdrop(t);
+  const [sc]=sceneAt(t);
+  const local=t-sc.start;
+  sc.draw(local, clamp(local/sc.dur));
+  const tail=sc.dur-local;
+  if(tail<0.55){ ctx.globalAlpha=(0.55-tail)/0.55*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  if(local<0.45){ ctx.globalAlpha=(0.45-local)/0.45*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  vignette();
+  ctx.restore();
+}
+
+const capText=document.getElementById('capText');
+const chNum=document.getElementById('chNum'), chName=document.getElementById('chName');
+let curCap='';
+function sync(t){
+  const [sc,idx]=sceneAt(t);
+  const local=t-sc.start;
+  let line='', li=-1;
+  sc.captions.forEach((c,i)=>{ if(local>=c[0]){ line=c[1]; li=i; } });
+  if(line!==curCap){ curCap=line; capText.style.opacity=0;
+    setTimeout(()=>{capText.textContent=curCap;capText.style.opacity=1;},120); }
+  chNum.textContent=String(idx+1).padStart(2,'0');
+  chName.textContent=sc.name;
+  const key=idx*100+li;
+  if(voOn&&playing&&li>=0&&key!==spoken){
+    spoken=key;
+    try{ speechSynthesis.cancel();
+      const utt=new SpeechSynthesisUtterance(line);
+      utt.rate=1.0; utt.pitch=1; speechSynthesis.speak(utt);
+    }catch(e){}
+  }
+  fill.style.width=(t/DUR*100)+'%';
+  knob.style.left=(t/DUR*100)+'%';
+  track.setAttribute('aria-valuenow',Math.round(t));
+  clock.innerHTML='<b>'+fmt(t)+'</b> / '+fmt(DUR);
+}
+const fmt=s=>Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+
+function loop(ts){
+  requestAnimationFrame(loop);
+  const dt=Math.min((ts-lastRAF)/1000||0,.05); lastRAF=ts;
+  if(playing){
+    T+=dt*rate;
+    if(T>=DUR){ T=DUR; setPlay(false); }
+  }
+  draw(T); sync(T);
+}
+requestAnimationFrame(loop);
+
+const play=document.getElementById('play'), bigplay=document.getElementById('bigplay');
+const track=document.getElementById('track'), fill=document.getElementById('fill'),
+      knob=document.getElementById('knob'), clock=document.getElementById('clock');
+
+SCENES.forEach(s=>{ if(!s.start)return;
+  const d=document.createElement('div'); d.className='tick';
+  d.style.left=(s.start/DUR*100)+'%'; track.appendChild(d);
+});
+
+function setPlay(p){
+  playing=p;
+  play.textContent=p?'❚❚ Pause':'▶ Play';
+  bigplay.hidden=p||T>0;
+  if(!p){ try{speechSynthesis.cancel();}catch(e){} }
+  if(p&&T>=DUR){ T=0; }
+}
+play.onclick=()=>setPlay(!playing);
+bigplay.onclick=()=>{ T=0; setPlay(true); };
+document.getElementById('back').onclick=()=>seek(T-10);
+document.getElementById('fwd').onclick=()=>seek(T+10);
+
+const RATES=[1,1.5,.5,.75];let ri=0;
+document.getElementById('speed').onclick=e=>{ ri=(ri+1)%RATES.length; rate=RATES[ri]; e.target.textContent=rate.toFixed(1)+'×'; };
+document.getElementById('capbtn').onclick=e=>{
+  const on=e.target.getAttribute('aria-pressed')==='true';
+  e.target.setAttribute('aria-pressed',!on); document.body.classList.toggle('nocap',on);
+};
+document.getElementById('vo').onclick=e=>{
+  voOn=e.target.getAttribute('aria-pressed')!=='true';
+  e.target.setAttribute('aria-pressed',voOn);
+  if(!voOn){try{speechSynthesis.cancel();}catch(err){}} else spoken=-1;
+};
+document.getElementById('full').onclick=()=>{
+  const el=document.documentElement;
+  if(document.fullscreenElement) document.exitFullscreen();
+  else el.requestFullscreen&&el.requestFullscreen();
+};
+
+function seek(t){ T=clamp(t,0,DUR); spoken=-1; try{speechSynthesis.cancel();}catch(e){} bigplay.hidden=true; draw(T); sync(T); }
+function fromEvent(e){
+  const r=track.getBoundingClientRect();
+  const cx=(e.touches?e.touches[0].clientX:e.clientX);
+  seek((cx-r.left)/r.width*DUR);
+}
+let drag=false;
+track.addEventListener('pointerdown',e=>{drag=true;track.setPointerCapture(e.pointerId);fromEvent(e);});
+track.addEventListener('pointermove',e=>{if(drag)fromEvent(e);});
+track.addEventListener('pointerup',e=>{drag=false;});
+track.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'){seek(T-5);e.preventDefault();}
+  if(e.key==='ArrowRight'){seek(T+5);e.preventDefault();}
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='BUTTON'&&e.key===' ')return;
+  if(e.key===' '){setPlay(!playing);e.preventDefault();}
+  if(e.key==='ArrowLeft')seek(T-10);
+  if(e.key==='ArrowRight')seek(T+10);
+  if(e.key==='f'||e.key==='F')document.getElementById('full').click();
+});
+
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>{resize();});
+resize(); sync(0);
+</script>
+</body>
+</html>

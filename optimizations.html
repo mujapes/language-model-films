@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Video Memory Optimizations for AI Pipelines</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,700;12..96,800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --paper:#0B1026;
+    --paper-2:#0E1533;
+    --ink:#F3EFE6;
+    --ink-dim:#8E96B8;
+    --rule:#26305C;
+    --cyan:#4FD6C8;
+    --magenta:#FF4D8D;
+    --amber:#FFB020;
+    --green:#10B981;
+    --display:'Bricolage Grotesque','Archivo',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--paper);color:var(--ink);
+    font-family:var(--mono);
+    -webkit-font-smoothing:antialiased;
+    display:flex;align-items:center;justify-content:center;
+    overflow:hidden;
+  }
+  #shell{
+    width:100%;height:100%;max-width:1600px;
+    display:flex;flex-direction:column;
+    padding:clamp(8px,1.6vmin,22px);gap:clamp(8px,1.4vmin,16px);
+  }
+  #top{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;min-height:20px}
+  #mark{
+    font-family:var(--display);font-weight:800;
+    font-size:clamp(11px,1.5vmin,15px);letter-spacing:.16em;text-transform:uppercase;
+  }
+  #mark b{color:var(--cyan);font-weight:800}
+  #chapter{
+    font-size:clamp(10px,1.35vmin,13px);color:var(--ink-dim);letter-spacing:.1em;
+    text-transform:uppercase;margin-left:auto;text-align:right;
+  }
+  #chapter em{color:var(--ink);font-style:normal}
+  #stage{
+    position:relative;flex:1;min-height:0;
+    border:1px solid var(--rule);border-radius:2px;
+    background:var(--paper-2);overflow:hidden;
+  }
+  canvas{display:block;width:100%;height:100%}
+  #cap{
+    position:absolute;left:0;right:0;bottom:0;
+    padding:clamp(14px,3vmin,34px) clamp(16px,5vmin,72px);
+    background:linear-gradient(to top,rgba(11,16,38,.94) 30%,rgba(11,16,38,0));
+    pointer-events:none;
+  }
+  #cap p{
+    margin:0;font-size:clamp(12px,1.95vmin,19px);line-height:1.5;
+    max-width:62ch;color:var(--ink);
+    text-wrap:balance;
+    transition:opacity .28s ease;
+  }
+  #cap p::before{
+    content:"";display:inline-block;width:1.6em;height:1px;
+    background:var(--cyan);vertical-align:middle;margin-right:.7em;
+    transform:translateY(-1px);
+  }
+  body.nocap #cap{display:none}
+  #bigplay{
+    position:absolute;inset:0;display:grid;place-items:center;
+    background:rgba(11,16,38,.72);border:0;cursor:pointer;
+    color:var(--ink);font-family:var(--display);font-weight:800;
+    letter-spacing:.14em;text-transform:uppercase;font-size:clamp(12px,1.7vmin,16px);
+  }
+  #bigplay span{
+    border:1px solid var(--cyan);color:var(--cyan);
+    padding:.85em 1.8em;border-radius:2px;
+  }
+  #bigplay:hover span{background:var(--cyan);color:var(--paper)}
+  #bigplay[hidden]{display:none}
+  #bar{display:flex;flex-direction:column;gap:clamp(6px,1vmin,10px)}
+  #track{
+    position:relative;height:26px;cursor:pointer;touch-action:none;
+    display:flex;align-items:center;
+  }
+  #rail{position:absolute;left:0;right:0;height:3px;background:var(--rule)}
+  #fill{position:absolute;left:0;height:3px;background:var(--cyan);width:0}
+  #knob{
+    position:absolute;width:2px;height:15px;background:var(--ink);
+    left:0;transform:translateX(-1px);
+  }
+  .tick{position:absolute;width:1px;height:9px;background:#3C4880;top:50%;transform:translateY(-50%)}
+  #track:focus-visible{outline:2px solid var(--cyan);outline-offset:4px}
+  #ctrls{display:flex;align-items:center;gap:clamp(6px,1.1vmin,12px);flex-wrap:wrap}
+  button.t{
+    font-family:var(--mono);font-size:clamp(10px,1.35vmin,13px);
+    letter-spacing:.09em;text-transform:uppercase;
+    background:transparent;color:var(--ink-dim);
+    border:1px solid var(--rule);border-radius:2px;
+    padding:.62em 1em;cursor:pointer;transition:.15s;white-space:nowrap;
+  }
+  button.t:hover{color:var(--ink);border-color:var(--ink-dim)}
+  button.t[aria-pressed="true"]{color:var(--paper);background:var(--ink);border-color:var(--ink)}
+  button.t:focus-visible{outline:2px solid var(--cyan);outline-offset:2px}
+  #play{color:var(--paper);background:var(--cyan);border-color:var(--cyan);min-width:7.5em;font-weight:600}
+  #play:hover{background:#5FE6D8}
+  #clock{
+    font-size:clamp(10px,1.35vmin,13px);color:var(--ink-dim);
+    letter-spacing:.06em;margin-left:auto;font-variant-numeric:tabular-nums;
+  }
+  #clock b{color:var(--ink);font-weight:500}
+  .hint{font-size:clamp(9px,1.2vmin,12px);color:#5A6494;letter-spacing:.06em}
+  @media (max-width:720px){ .wide{display:none} #clock{margin-left:auto} }
+</style>
+</head>
+<body>
+<div id="shell">
+  <div id="top">
+    <div id="mark">Video Memory <b>Optimizations</b></div>
+    <div id="chapter"><em id="chNum">01</em> · <span id="chName">Cold open</span></div>
+  </div>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="cap"><p id="capText"></p></div>
+    <button id="bigplay"><span>▶ Play film · 4:30</span></button>
+  </div>
+
+  <div id="bar">
+    <div id="track" tabindex="0" role="slider" aria-label="Timeline" aria-valuemin="0" aria-valuemax="270" aria-valuenow="0">
+      <div id="rail"></div><div id="fill"></div><div id="knob"></div>
+    </div>
+    <div id="ctrls">
+      <button class="t" id="play">▶ Play</button>
+      <button class="t" id="back">◀◀ 10s</button>
+      <button class="t" id="fwd">10s ▶▶</button>
+      <button class="t" id="speed">1.0×</button>
+      <button class="t" id="capbtn" aria-pressed="true">Captions</button>
+      <button class="t" id="vo" aria-pressed="false">Narration</button>
+      <button class="t wide" id="full">Fullscreen</button>
+      <div id="clock"><b>0:00</b> / 4:30</div>
+    </div>
+    <div class="hint wide">Space play · ← → skip 10s · F fullscreen</div>
+  </div>
+</div>
+
+<script>
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const W = 1600, H = 900;
+let DPR = 1, ox = 0, oy = 0, scale = 1;
+
+function resize(){
+  const r = cv.getBoundingClientRect();
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = Math.round(r.width * DPR);
+  cv.height = Math.round(r.height * DPR);
+  scale = Math.min(r.width / W, r.height / H);
+  ox = (r.width - W * scale) / 2;
+  oy = (r.height - H * scale) / 2;
+  draw(T);
+}
+new ResizeObserver(resize).observe(document.getElementById('stage'));
+
+const C = {
+  paper:'#0E1533', ink:'#F3EFE6', dim:'#8E96B8', rule:'#26305C',
+  cyan:'#4FD6C8', magenta:'#FF4D8D', amber:'#FFB020', green:'#10B981', deep:'#0B1026'
+};
+const DISPLAY = '"Bricolage Grotesque","Archivo",system-ui,sans-serif';
+const MONO = '"IBM Plex Mono",ui-monospace,Menlo,monospace';
+
+const clamp=(v,a=0,b=1)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const seq=(u,a,b)=>clamp((u-a)/(b-a));
+const eOut=t=>1-Math.pow(1-t,3);
+const eIn=t=>t*t*t;
+const eInOut=t=>t<.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2;
+function hash(n){ let x=Math.sin(n*127.1+311.7)*43758.5453; return x-Math.floor(x); }
+
+function txt(s,x,y,o={}){
+  ctx.save();
+  ctx.font=o.font||`400 24px ${MONO}`;
+  ctx.fillStyle=o.fill||C.ink;
+  ctx.textAlign=o.align||'left';
+  ctx.textBaseline=o.baseline||'alphabetic';
+  ctx.globalAlpha=o.alpha===undefined?1:clamp(o.alpha);
+  if(o.track){ 
+    const chars=[...s]; let total=0;
+    for(const ch of chars) total+=ctx.measureText(ch).width+o.track;
+    total-=o.track;
+    let cx = o.align==='center'? x-total/2 : o.align==='right'? x-total : x;
+    ctx.textAlign='left';
+    for(const ch of chars){ ctx.fillText(ch,cx,y); cx+=ctx.measureText(ch).width+o.track; }
+  } else ctx.fillText(s,x,y);
+  ctx.restore();
+}
+function measure(s,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(s).width; ctx.restore(); return w; }
+
+function ghostTitle(s,x,y,size,alpha=1,align='center',color=C.cyan){
+  const f=`800 ${size}px ${DISPLAY}`;
+  const tr=size*0.01;
+  txt(s,x-3,y+2,{font:f,fill:C.magenta,align,alpha:alpha*.55,track:tr});
+  txt(s,x+3,y-2,{font:f,fill:C.green,align,alpha:alpha*.5,track:tr});
+  txt(s,x,y,{font:f,fill:color,align,alpha,track:tr});
+}
+
+function plot(pts,p,o={}){
+  if(pts.length<2||p<=0)return;
+  let total=0; const seg=[];
+  for(let i=1;i<pts.length;i++){
+    const d=Math.hypot(pts[i][0]-pts[i-1][0],pts[i][1]-pts[i-1][1]);
+    seg.push(d); total+=d;
+  }
+  const target=total*clamp(p);
+  ctx.save();
+  ctx.strokeStyle=o.stroke||C.ink; ctx.lineWidth=o.w||1.5;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.globalAlpha=o.alpha===undefined?1:o.alpha;
+  if(o.dash)ctx.setLineDash(o.dash);
+  ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+  let acc=0;
+  for(let i=1;i<pts.length;i++){
+    if(acc+seg[i-1]<=target){ ctx.lineTo(pts[i][0],pts[i][1]); acc+=seg[i-1]; }
+    else{
+      const k=(target-acc)/seg[i-1];
+      ctx.lineTo(lerp(pts[i-1][0],pts[i][0],k),lerp(pts[i-1][1],pts[i][1],k));
+      break;
+    }
+  }
+  ctx.stroke(); ctx.restore();
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  const k=Math.min(r,w/2,h/2);
+  ctx.moveTo(x+k,y); ctx.arcTo(x+w,y,x+w,y+h,k); ctx.arcTo(x+w,y+h,x,y+h,k);
+  ctx.arcTo(x,y+h,x,y,k); ctx.arcTo(x,y,x+w,y,k); ctx.closePath();
+}
+function chip(x,y,w,h,{fill,stroke,alpha=1,r=3}={}){
+  ctx.save(); ctx.globalAlpha=alpha;
+  rr(x,y,w,h,r);
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.25;ctx.stroke();}
+  ctx.restore();
+}
+function typeOn(s,x,y,p,o={}){
+  const n=Math.floor(clamp(p)*s.length+.0001);
+  const shown=s.slice(0,n);
+  txt(shown,x,y,o);
+  if(p<1&&p>0){
+    const f=o.font||`400 24px ${MONO}`;
+    const wAll=measure(shown,f);
+    const cx=o.align==='center'?x-measure(s,f)/2+wAll:o.align==='right'?x-measure(s,f)+wAll:x+wAll;
+    const sz=parseInt(f)||24;
+    ctx.save();ctx.globalAlpha=.9;ctx.fillStyle=C.cyan;
+    ctx.fillRect(cx+3,y-sz*.78,sz*.5,sz*.9);ctx.restore();
+  }
+}
+function eyebrow(s,x,y,alpha=1,color=C.cyan,align='center'){
+  txt(s,x,y,{font:`500 15px ${MONO}`,fill:color,alpha,track:3.2,align});
+}
+
+function backdrop(t){
+  ctx.fillStyle=C.paper; ctx.fillRect(0,0,W,H);
+  ctx.save(); ctx.globalAlpha=.5; ctx.fillStyle='#1A2247';
+  for(let x=40;x<W;x+=40) for(let y=40;y<H;y+=40) ctx.fillRect(x,y,1.2,1.2);
+  ctx.restore();
+  ctx.save(); ctx.globalAlpha=.35; ctx.strokeStyle=C.rule; ctx.lineWidth=1;
+  const yy=H/2+Math.sin(t*.18)*70;
+  ctx.beginPath();ctx.moveTo(0,yy);ctx.lineTo(W,yy);ctx.stroke(); ctx.restore();
+}
+function vignette(){
+  const g=ctx.createRadialGradient(W/2,H/2,H*.35,W/2,H/2,H*.95);
+  g.addColorStop(0,'rgba(0,0,0,0)'); g.addColorStop(1,'rgba(6,9,24,.75)');
+  ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+}
+
+const SCENES=[];
+const S=(id,name,dur,captions,draw)=>SCENES.push({id,name,dur,captions,draw});
+
+/* 01 - COLD OPEN */
+S('open','Cold open',20,[
+  [0.4,'Your video is 26KB. YouTube videos? 50-200MB runtime memory.'],
+  [8,'Four optimizations to make AI-generated video even lighter. Faster to generate. Better to stream.']
+],(t,u)=>{
+  const line='26KB vs 50–200MB.';
+  typeOn(line,W/2,300,seq(u,.03,.30),{font:`500 46px ${MONO}`,align:'center',fill:C.dim});
+  const a=seq(u,.36,.52);
+  if(a>0){
+    ghostTitle('VIDEO MEMORY',W/2,470,92,a);
+    ghostTitle('OPTIMIZATIONS',W/2,570,92,seq(u,.42,.58));
+  }
+  const b=seq(u,.60,.75);
+  if(b>0){
+    plot([[W/2-260,620],[W/2+260,620]],b,{stroke:C.cyan,w:2});
+    eyebrow('FOUR APPROACHES',W/2,668,seq(u,.66,.80));
+  }
+});
+
+/* 02 - CURRENT APPROACH */
+S('current','What you have',25,[
+  [0.3,'Pure procedural: render(t) → pixels. No storage, no codec.'],
+  [7,'The function takes time t and outputs the frame. That\'s it.'],
+  [14,'Pros: Tiny, perfect scrubbing, instant. Cons: Hard to modify after, locked to code.'],
+  [20,'Memory: 5–10MB runtime. Filesize: 26KB on disk.']
+],(t,u)=>{
+  eyebrow('CURRENT APPROACH',W/2,150,seq(u,.02,.10),C.amber);
+  
+  // Code block
+  const code='render(t) → pixels';
+  chip(150,250,1300,100,{stroke:C.amber,fill:'rgba(255,176,32,.05)',alpha:seq(u,.08,.25)});
+  txt(code,W/2,320,{font:`500 28px ${MONO}`,align:'center',fill:C.amber,alpha:seq(u,.08,.25)});
+  
+  // Stats
+  const stats=[
+    ['5–10MB','Runtime'],
+    ['26KB','Disk'],
+    ['0ms','Load time']
+  ];
+  const sx=W/2-450;
+  stats.forEach((stat,i)=>{
+    const st=clamp((seq(u,.28,.58)-i*.06)/.28);
+    if(st<=0)return;
+    const y=430;
+    chip(sx+i*300,y-30,200,80,{stroke:C.amber,fill:'rgba(255,176,32,.08)',alpha:st});
+    txt(stat[0],sx+i*300+100,y,{font:`600 24px ${MONO}`,align:'center',fill:C.amber,alpha:st});
+    txt(stat[1],sx+i*300+100,y+35,{font:`400 14px ${MONO}`,align:'center',fill:C.dim,alpha:st*.7});
+  });
+  
+  if(seq(u,.62,.78)>0){
+    txt('Perfect for distribution. Hard to customize or regenerate.',W/2,620,
+      {font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.62,.78)});
+  }
+});
+
+/* 03 - KEYFRAME HYBRID */
+S('keyframe','Optimization 1: Keyframe Hybrid',28,[
+  [0.3,'Claude generates frame descriptions. Server renders 10–20 keyframes.'],
+  [7,'Browser interpolates between them. Same visual quality, more flexible.'],
+  [14,'Modify colors, text, layout without re-rendering everything.'],
+  [21,'Memory: 30–50MB. Filesize: 500KB. Generation: 1–2s per frame.']
+],(t,u)=>{
+  eyebrow('OPTIMIZATION 1',W/2,150,seq(u,.02,.10),C.green);
+  ghostTitle('KEYFRAME HYBRID',W/2,260,64,seq(u,.08,.28));
+  
+  // Pipeline visualization
+  const steps=[
+    ['Claude\nDescribe',150],
+    ['Server\nRender KF',500],
+    ['Browser\nInterpolate',850]
+  ];
+  const py=420;
+  steps.forEach((step,i)=>{
+    const st=clamp((seq(u,.28,.55)-i*.09)/.22);
+    if(st<=0)return;
+    const x=step[1];
+    chip(x-80,py-50,160,100,{stroke:C.green,fill:'rgba(16,185,129,.08)',alpha:st});
+    txt(step[0],x,py,{font:`500 18px ${MONO}`,align:'center',fill:C.green,alpha:st});
+  });
+  
+  // Arrows
+  const arr=seq(u,.48,.64);
+  if(arr>0){
+    plot([[230,py],[420,py]],arr,{stroke:C.green,w:2});
+    plot([[580,py],[770,py]],arr,{stroke:C.green,w:2});
+  }
+  
+  if(seq(u,.60,.78)>0){
+    txt('Tradeoff: More flexible, still lightweight.',W/2,650,
+      {font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.60,.78)});
+  }
+});
+
+/* 04 - TOKEN STREAM */
+S('tokens','Optimization 2: Token Stream',26,[
+  [0.3,'Compress frames as token sequences. Like how LLMs compress text.'],
+  [8,'Frame 0: [1023, 445, 223, ...]. Frame 1: [1023, 446, 224, ...] (mostly same).'],
+  [14,'Only store deltas. Radical compression.'],
+  [20,'Memory: 1–5MB. Filesize: 50–100KB. Tradeoff: Needs custom decoder.']
+],(t,u)=>{
+  eyebrow('OPTIMIZATION 2',W/2,150,seq(u,.02,.10),C.cyan);
+  ghostTitle('TOKEN STREAM',W/2,260,64,seq(u,.08,.28));
+  
+  // Token visualization
+  const tokens='[1023, 445, 223, 892, 101, ...]';
+  const gap=45;
+  const toks=['1023','445','223','892','101'];
+  const tx=W/2-measure(tokens,'500 20px '+MONO)/2;
+  
+  toks.forEach((tok,i)=>{
+    const st=clamp((seq(u,.25,.50)-i*.05)/.2);
+    if(st<=0)return;
+    const x=tx+i*gap;
+    chip(x-20,350,40,60,{stroke:C.cyan,fill:'rgba(79,214,200,.08)',alpha:st});
+    txt(tok,x,390,{font:`400 16px ${MONO}`,align:'center',fill:C.cyan,alpha:st});
+  });
+  
+  // Delta explanation
+  const delta=seq(u,.52,.72);
+  if(delta>0){
+    txt('Frame 1: Δ+1  Frame 2: Δ+1  Frame 3: Δ-3',W/2,480,
+      {font:`400 18px ${MONO}`,align:'center',fill:C.cyan,alpha:delta});
+    txt('Only deltas, not full frames',W/2,520,
+      {font:`400 16px ${MONO}`,align:'center',fill:C.dim,alpha:delta*.8});
+  }
+});
+
+/* 05 - CHUNKED PROCEDURAL */
+S('chunked','Optimization 3: Chunked Procedural',25,[
+  [0.3,'Claude generates one scene at a time, not the whole video.'],
+  [8,'Browser plays scene 1 while Claude generates scene 2.'],
+  [14,'Streaming experience. No wait. No scrubbing until done.'],
+  [20,'Memory: 1–2MB. Filesize: N/A. Generation: Streaming.']
+],(t,u)=>{
+  eyebrow('OPTIMIZATION 3',W/2,150,seq(u,.02,.10),C.amber);
+  ghostTitle('CHUNKED PROCEDURAL',W/2,260,64,seq(u,.08,.26));
+  
+  // Timeline with async generation
+  const tl=[
+    ['Scene 1 Gen',150,0.08],
+    ['Playing...',350,0.2],
+    ['Scene 2 Gen',550,0.35],
+    ['Scene 3 Gen',750,0.5],
+    ['Playing',950,0.7]
+  ];
+  
+  const ty=400;
+  plot([[100,ty],[1450,ty]],seq(u,.05,.15),{stroke:C.amber,w:1});
+  
+  tl.forEach((item,i)=>{
+    const [label,x,st_seq]=item;
+    const st=seq(u,st_seq,st_seq+0.12);
+    if(st<=0)return;
+    const col=i%2===0?C.amber:C.cyan;
+    chip(x-70,ty-35,140,70,{stroke:col,fill:`rgba(${col},0.08)`,alpha:st});
+    txt(label,x,ty,{font:`500 16px ${MONO}`,align:'center',fill:col,alpha:st});
+  });
+  
+  if(seq(u,.58,.76)>0){
+    txt('Claude generates incrementally. User watches immediately.',W/2,650,
+      {font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.58,.76)});
+  }
+});
+
+/* 06 - SVG DELTA */
+S('svg','Optimization 4: SVG + Delta',22,[
+  [0.3,'Use SVG paths, not pixel data. Animate via JavaScript timeline.'],
+  [8,'Infinitely scalable. Perfect for data visualization.'],
+  [14,'Memory: 2–8MB. Filesize: 50–200KB. Tradeoff: Vector-only.']
+],(t,u)=>{
+  eyebrow('OPTIMIZATION 4',W/2,150,seq(u,.02,.10),C.green);
+  ghostTitle('SVG + DELTA',W/2,260,64,seq(u,.08,.25));
+  
+  // SVG example
+  const st=seq(u,.10,.35);
+  if(st>0){
+    ctx.save(); ctx.globalAlpha=st;
+    ctx.strokeStyle=C.green; ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(300,450);
+    for(let i=0;i<=50;i++){
+      const x=300+i*8;
+      const y=450-Math.sin(i*0.3)*30;
+      if(i===0)ctx.moveTo(x,y);
+      else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+  
+  txt('<path d="M 300,450 L 308,425 L 316,405..." />',W/2,350,
+    {font:`400 16px ${MONO}`,align:'center',fill:C.green,alpha:seq(u,.12,.32)});
+  
+  // Stats
+  const v_st=seq(u,.38,.58);
+  if(v_st>0){
+    chip(150,550,600,70,{stroke:C.green,fill:'rgba(16,185,129,.08)',alpha:v_st});
+    txt('Vector: Infinitely scalable. Perfect for info viz.',150+300,585,
+      {font:`500 18px ${MONO}`,align:'center',fill:C.green,alpha:v_st});
+  }
+});
+
+/* 07 - COMPARISON */
+S('compare','Comparison Table',30,[
+  [0.5,'Five approaches, five tradeoffs. Pick what fits your use case.']
+],(t,u)=>{
+  eyebrow('THE TRADEOFFS',W/2,150,seq(u,.02,.12),C.amber);
+  
+  const rows=[
+    ['Pure procedural','26KB','5–10MB','✓','Instant'],
+    ['Keyframe hybrid','500KB','30–50MB','◐','1–2s/frame'],
+    ['Token stream','50KB','1–5MB','✗','100ms/frame'],
+    ['Chunked proc','N/A','1–2MB','✗','Streaming'],
+    ['SVG delta','100KB','2–8MB','✓','500ms/frame']
+  ];
+  
+  const colW=[280,130,140,100,140];
+  const rowH=50;
+  const startX=180, startY=250;
+  
+  // Headers
+  const headers=['Approach','Filesize','Memory','Scrub','Speed'];
+  headers.forEach((h,i)=>{
+    const x=startX+colW.slice(0,i).reduce((a,b)=>a+b,0);
+    const st=seq(u,.04,.18);
+    if(st>0){
+      txt(h,x+colW[i]/2,startY+25,{font:`600 14px ${MONO}`,align:'center',fill:C.amber,alpha:st});
+    }
+  });
+  
+  // Rows
+  rows.forEach((row,ri)=>{
+    row.forEach((cell,ci)=>{
+      const st=clamp((seq(u,.15,.65)-(ri+1)*.05)/.4);
+      if(st<=0)return;
+      const x=startX+colW.slice(0,ci).reduce((a,b)=>a+b,0);
+      const y=startY+rowH*(ri+1);
+      const col=ci===0?C.cyan:C.dim;
+      txt(cell,x+colW[ci]/2,y+25,{font:`400 13px ${MONO}`,align:'center',fill:col,alpha:st});
+    });
+  });
+});
+
+/* 08 - RECOMMENDATION */
+S('rec','For AI pipelines',24,[
+  [0.3,'Best approach: Chunked procedural.'],
+  [6,'Claude generates scene 1 (18s). Browser plays it. Claude generates scene 2. And so on.'],
+  [13,'Streaming experience. No wait. User sees content immediately.'],
+  [19,'Memory: 1–2MB per scene. Generation: Fire-and-forget.']
+],(t,u)=>{
+  eyebrow('FOR AI VIDEO GENERATION',W/2,150,seq(u,.02,.10),C.green);
+  
+  const title='CHUNKED PROCEDURAL';
+  ghostTitle(title,W/2,300,80,seq(u,.08,.28),undefined,C.green);
+  
+  // Flow
+  const flow=[
+    ['Scene 1','18s',C.cyan],
+    ['↓','', C.dim],
+    ['Scene 2','22s',C.magenta],
+    ['↓','',C.dim],
+    ['Scene N','Nmin',C.amber]
+  ];
+  
+  let y=420;
+  flow.forEach((f,i)=>{
+    const st=clamp((seq(u,.32,.65)-i*.08)/.3);
+    if(st<=0)return;
+    const col=f[2];
+    txt(f[0],W/2,y,{font:f[0]==='↓'?'500 24px '+MONO:'600 22px '+MONO,align:'center',fill:col,alpha:st});
+    if(f[1])txt(f[1],W/2+120,y,{font:`500 18px ${MONO}`,align:'left',fill:C.dim,alpha:st*.7});
+    y+=50;
+  });
+  
+  if(seq(u,.68,.82)>0){
+    txt('User watches. Claude keeps generating. Stateless. Scalable.',W/2,750,
+      {font:`400 18px ${MONO}`,align:'center',fill:C.dim,alpha:seq(u,.68,.82)});
+  }
+});
+
+/* 09 - CLOSE */
+S('close','Close',15,[
+  [0.3,'26KB was already good. These optimizations make it better for AI.'],
+  [8,'Pick based on what you need: filesize, memory, scrubbing, or speed.'],
+  [12,'For autonomous generation: chunk it. Let Claude generate incrementally.']
+],(t,u)=>{
+  const labels=['Filesize','Memory','Scrubbing','Speed'];
+  const f=`500 24px ${MONO}`;
+  const ws=labels.map(s=>measure(s,f)+44);
+  const total=ws.reduce((a,b)=>a+b,0)+12*(labels.length-1);
+  let x=W/2-total/2;
+  labels.forEach((s,i)=>{
+    const st=clamp((seq(u,.05,.35)-i*.065)/.25);
+    const y=320+(1-eOut(clamp(st)))*40;
+    if(st>0){
+      chip(x,y-34,ws[i],52,{stroke:C.cyan,fill:'rgba(79,214,200,.07)',alpha:st});
+      txt(s,x+ws[i]/2,y,{font:f,align:'center',fill:C.cyan,alpha:st});
+    }
+    x+=ws[i]+12;
+  });
+  
+  const a=seq(u,.40,.60);
+  if(a>0){
+    ghostTitle('PICK YOUR TRADEOFF.',W/2,520,72,a,undefined,C.cyan);
+  }
+  
+  if(seq(u,.65,.80)>0){
+    txt('For Claude? Chunk it.',W/2,650,
+      {font:`600 26px ${MONO}`,align:'center',fill:C.green,alpha:seq(u,.65,.80)});
+  }
+});
+
+let acc=0;
+for(const s of SCENES){ s.start=acc; acc+=s.dur; }
+const DUR=acc;
+let T=0, playing=false, rate=1, lastRAF=0;
+let voOn=false, spoken=-1;
+
+function sceneAt(t){
+  for(let i=SCENES.length-1;i>=0;i--) if(t>=SCENES[i].start) return [SCENES[i],i];
+  return [SCENES[0],0];
+}
+function draw(t){
+  const r=cv.getBoundingClientRect();
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  ctx.fillStyle=C.deep; ctx.fillRect(0,0,r.width,r.height);
+  ctx.save();
+  ctx.setTransform(DPR,0,0,DPR,ox*DPR,oy*DPR);
+  ctx.scale(scale,scale);
+  ctx.beginPath();ctx.rect(0,0,W,H);ctx.clip();
+  backdrop(t);
+  const [sc]=sceneAt(t);
+  const local=t-sc.start;
+  sc.draw(local, clamp(local/sc.dur));
+  const tail=sc.dur-local;
+  if(tail<0.55){ ctx.globalAlpha=(0.55-tail)/0.55*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  if(local<0.45){ ctx.globalAlpha=(0.45-local)/0.45*0.9; ctx.fillStyle=C.deep; ctx.fillRect(0,0,W,H); ctx.globalAlpha=1; }
+  vignette();
+  ctx.restore();
+}
+
+const capText=document.getElementById('capText');
+const chNum=document.getElementById('chNum'), chName=document.getElementById('chName');
+let curCap='';
+function sync(t){
+  const [sc,idx]=sceneAt(t);
+  const local=t-sc.start;
+  let line='', li=-1;
+  sc.captions.forEach((c,i)=>{ if(local>=c[0]){ line=c[1]; li=i; } });
+  if(line!==curCap){ curCap=line; capText.style.opacity=0;
+    setTimeout(()=>{capText.textContent=curCap;capText.style.opacity=1;},120); }
+  chNum.textContent=String(idx+1).padStart(2,'0');
+  chName.textContent=sc.name;
+  const key=idx*100+li;
+  if(voOn&&playing&&li>=0&&key!==spoken){
+    spoken=key;
+    try{ speechSynthesis.cancel();
+      const utt=new SpeechSynthesisUtterance(line);
+      utt.rate=1.0; utt.pitch=1; speechSynthesis.speak(utt);
+    }catch(e){}
+  }
+  fill.style.width=(t/DUR*100)+'%';
+  knob.style.left=(t/DUR*100)+'%';
+  track.setAttribute('aria-valuenow',Math.round(t));
+  clock.innerHTML='<b>'+fmt(t)+'</b> / '+fmt(DUR);
+}
+const fmt=s=>Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0');
+
+function loop(ts){
+  requestAnimationFrame(loop);
+  const dt=Math.min((ts-lastRAF)/1000||0,.05); lastRAF=ts;
+  if(playing){
+    T+=dt*rate;
+    if(T>=DUR){ T=DUR; setPlay(false); }
+  }
+  draw(T); sync(T);
+}
+requestAnimationFrame(loop);
+
+const play=document.getElementById('play'), bigplay=document.getElementById('bigplay');
+const track=document.getElementById('track'), fill=document.getElementById('fill'),
+      knob=document.getElementById('knob'), clock=document.getElementById('clock');
+
+SCENES.forEach(s=>{ if(!s.start)return;
+  const d=document.createElement('div'); d.className='tick';
+  d.style.left=(s.start/DUR*100)+'%'; track.appendChild(d);
+});
+
+function setPlay(p){
+  playing=p;
+  play.textContent=p?'❚❚ Pause':'▶ Play';
+  bigplay.hidden=p||T>0;
+  if(!p){ try{speechSynthesis.cancel();}catch(e){} }
+  if(p&&T>=DUR){ T=0; }
+}
+play.onclick=()=>setPlay(!playing);
+bigplay.onclick=()=>{ T=0; setPlay(true); };
+document.getElementById('back').onclick=()=>seek(T-10);
+document.getElementById('fwd').onclick=()=>seek(T+10);
+
+const RATES=[1,1.5,.5,.75];let ri=0;
+document.getElementById('speed').onclick=e=>{ ri=(ri+1)%RATES.length; rate=RATES[ri]; e.target.textContent=rate.toFixed(1)+'×'; };
+document.getElementById('capbtn').onclick=e=>{
+  const on=e.target.getAttribute('aria-pressed')==='true';
+  e.target.setAttribute('aria-pressed',!on); document.body.classList.toggle('nocap',on);
+};
+document.getElementById('vo').onclick=e=>{
+  voOn=e.target.getAttribute('aria-pressed')!=='true';
+  e.target.setAttribute('aria-pressed',voOn);
+  if(!voOn){try{speechSynthesis.cancel();}catch(err){}} else spoken=-1;
+};
+document.getElementById('full').onclick=()=>{
+  const el=document.documentElement;
+  if(document.fullscreenElement) document.exitFullscreen();
+  else el.requestFullscreen&&el.requestFullscreen();
+};
+
+function seek(t){ T=clamp(t,0,DUR); spoken=-1; try{speechSynthesis.cancel();}catch(e){} bigplay.hidden=true; draw(T); sync(T); }
+function fromEvent(e){
+  const r=track.getBoundingClientRect();
+  const cx=(e.touches?e.touches[0].clientX:e.clientX);
+  seek((cx-r.left)/r.width*DUR);
+}
+let drag=false;
+track.addEventListener('pointerdown',e=>{drag=true;track.setPointerCapture(e.pointerId);fromEvent(e);});
+track.addEventListener('pointermove',e=>{if(drag)fromEvent(e);});
+track.addEventListener('pointerup',e=>{drag=false;});
+track.addEventListener('keydown',e=>{
+  if(e.key==='ArrowLeft'){seek(T-5);e.preventDefault();}
+  if(e.key==='ArrowRight'){seek(T+5);e.preventDefault();}
+});
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='BUTTON'&&e.key===' ')return;
+  if(e.key===' '){setPlay(!playing);e.preventDefault();}
+  if(e.key==='ArrowLeft')seek(T-10);
+  if(e.key==='ArrowRight')seek(T+10);
+  if(e.key==='f'||e.key==='F')document.getElementById('full').click();
+});
+
+if(document.fonts&&document.fonts.ready) document.fonts.ready.then(()=>{resize();});
+resize(); sync(0);
+</script>
+</body>
+</html>
